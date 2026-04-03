@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fichas</title>
+
+  <!-- CSS files -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- export -->
+  <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+
+<body>
+  <div class="page-actions no-export">
+    <button class="btn" id="clearAll">Resetar tudo</button>
+    <div class="hint">Salva automático (debounce). Exporta por ficha.</div>
+  </div>
+
+  <div class="all-fichas" id="allFichas"></div>
+
+  <div class="global-add no-export">
+    <div class="global-plus" id="addSheet">+</div>
+  </div>
+
+<script src="script.js"></script>
+</body>
+</html>
