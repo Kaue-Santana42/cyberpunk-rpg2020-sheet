@@ -1,59 +1,151 @@
 /* =============================
-   STATE em memória + debounce save
+  DATA PERSISTENCE (LocalStorage Logic)
 ============================= */
-const STORAGE_KEY = "fichas_v4";
-let STATE = loadState();
-let saveTimer = null;
+/** @constant {string} - The key used to identify the data in LocalStorage */
+const CHARACTER_SHEETS_STORAGE_KEY = "cyberpunk_sheets_v4";
 
-function loadState(){
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if(!parsed || !Array.isArray(parsed.sheets)) return { sheets: [] };
-    return parsed;
-  }catch{
+/** @type {object} - In-memory state of all character sheets */
+let appState = loadApplicationState();
+
+/** @type {number|null} - Timer reference for the debounce saving function */
+let saveDebounceTimer = null;
+
+function loadApplicationState(){
+  try {
+    const rawData = localStorage.getItem(CHARACTER_SHEETS_STORAGE_KEY);
+    const parsedData = rawData ? JSON.parse(rawData) : null;
+
+    // Validation: ensures parsedData exists and has a 'sheets' array
+    if (!parsedData || !Array.isArray(parsedData.sheets)) {
+      return { sheets: [] };
+    } 
+    return parsedData;
+  } catch (error) {
+    console.error("Error loading state from LocalStorage:", error);
     return { sheets: [] };
   }
 }
-function scheduleSave(){
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(STATE));
+
+/**
+ * Schedules a save operation to LocalStorage using a debounce technique
+ * to avoid excessive writes during rapid input changes
+ */
+function scheduleStateSave(){
+  clearTimeout(saveDebounceTimer);
+
+  // Saves after 200ms of inactivity
+  saveDebounceTimer = setTimeout(() => {
+    localStorage.setItem(CHARACTER_SHEETS_STORAGE_KEY, JSON.stringify(appState));
+    console.log("State auto-saved to LocalStorage.")
   }, 200);
 }
-function uid(){
+
+/**
+ * Generates a unique identifier for each character sheet.
+ * Combines a random string with the current timestamp to avoid collisions
+ * @returns {string} A unique hex string
+ */
+function generateUniqueId(){
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
 
 /* =============================
-   Modelo
+  CHARACTER MODEL (Template)
 ============================= */
-function makeEmptySheet(){
+/**
+ * Creates a new, empty Cyberpunk 2020 character sheet object.
+ * @returns {object} The initial state for a new character
+ */
+function createEmptySheet(){
   return {
-    id: uid(),
-    nome: "",
-    papel: "",
-    vit: "0",
-    mtc: "0",
-    armorPB: { cabeca:0, torso:0, bracoD:0, bracoE:0, pernaD:0, pernaE:0 },
-    track: Array(40).fill(false),
+    id: generateUniqueId(),
+    name: "",
+    role: "",
+    vitality: "0",
+    btm: "0",
+    armorSP: { // Stopping Power
+      head:0, 
+      torso:0, 
+      rightArm:0, 
+      leftArm:0, 
+      RightLeg:0, 
+      leftLeg:0 },
+    damageTrack: Array(40).fill(false),
     mainImage: null,
-    status: [
-      { nome:"Int", valor:"", fixed:true },
-      { nome:"Ref", valor:"", fixed:true },
-      { nome:"Tech", valor:"", fixed:true },
-      { nome:"auCon", valor:"", fixed:true },
-      { nome:"Atr", valor:"", fixed:true },
-      { nome:"sor", valor:"", fixed:true },
-      { nome:"mov", valor:"", fixed:true },
-      { nome:"tco", valor:"", fixed:true },
-      { nome:"emp", valor:"", fixed:true },
-      { nome:"correr", valor:"", fixed:true, readonly:true }, // mov*3
-      { nome:"saltar", valor:"", fixed:true, readonly:true }  // correr/5
+    stats: [
+      { name:"INT", value:"", isFixed:true },
+      { name:"REF", value:"", isFixed:true },
+      { name:"TECH", value:"", isFixed:true },
+      { name:"COOL", value:"", isFixed:true },
+      { name:"ATTR", value:"", isFixed:true },
+      { name:"LUCK", value:"", isFixed:true },
+      { name:"MA", value:"", isFixed:true }, // Movement Allowance
+      { name:"BODY", value:"", isFixed:true },
+      { name:"EMP", value:"", isFixed:true },
+      // Derived stats (Calculated)
+      { name:"RUN", value:"", isFixed:true, isReadonly:true }, // MA * 3
+      { name:"LEAP", value:"", isFixed:true, isReadonly:true }  // RUN / 4
     ],
-    equips: [],
+    equipment: [],
     skills: []
   };
+}
+
+/* =============================
+   STATS CALCULATION
+============================= */
+/**
+ * Constans for Cyberpunk 2020 movement rules.
+ * Extracting these makes the code easier to maintain and read
+ */
+const RUN_MULTIPLIER = 3;
+const LEAP_DIVISOR = 4;
+/**
+ * Reacalculates movement-based stats (Run/Leap) and returns the sum of base attributes.
+ * Also updates the sheet's stats array with the calculated values
+ * @param {object} sheet - The character sheet object containing  the stats array
+ * @returns {number} The sum of all base attributes (excluding derived movement stats)
+ */
+
+function updateMovementAndTotalStats(sheet){
+  const statsList = sheet.stats;
+
+  // 1. Find indices for necessary stats
+  const maIndex = statsList.findIndex(x => (x.name||"").toLowerCase()==="ma");
+  const runIndex = statsList.findIndex(x => (x.name||"").toLowerCase()==="run");
+  const leapIndex = statsList.findIndex(x => (x.name||"").toLowerCase()==="leap");
+
+  // 2. Calculate Run and Leap based on Movement Allowance (MA)
+  // toNum() converts strings//nulls to a safe number
+  const movementAllowance = maIndex >= 0 ? toNum(statsList[maIndex].value) : 0;
+
+  const runValue = movementAllowance * RUN_MULTIPLIER;
+  const leapValue = runValue / LEAP_DIVISOR;
+
+  // 3. Update the sheet values using the formatting helper (fmt2)
+  if(runIndex >= 0) {
+    statsList[runIndex].value = fmt2(runValue);
+  } 
+  if(leapIndex >= 0) {
+    statsList[leapIndex].value = fmt2(leapValue);
+  } 
+
+  // 4. Calculate the Total Point Sum
+  // This is useful for character creation (e.g., checking if the player spent 60 points)
+  let attributeTotal = 0;
+
+  for(const stat of statsList){
+    const statName = (stat.name||"").toLowerCase();
+
+    // Skip derived stats to avoid double-counting or including non-base points
+    if(statName === "run" || statName === "leap") {
+      continue;
+    } 
+
+    attributeTotal += toNum(stat.value);
+  }
+
+  return attributeTotal;
 }
 
 /* =============================
@@ -101,7 +193,7 @@ async function exportSheetAsJpeg(sheetEl, sheet){
   const canvas = await html2canvas(sheetEl, { scale: 2, backgroundColor: "#ffffff" });
   const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
   hidden.forEach(el => el.style.display = "");
-  const filename = sheet.nome ? `Ficha_${sanitizeFilename(sheet.nome)}` : `ficha_${sheet.id}`;
+  const filename = sheet.name ? `Ficha_${sanitizeFilename(sheet.name)}` : `ficha_${sheet.id}`;
   downloadDataUrl(dataUrl, filename + ".jpg");
 }
 async function exportSheetAsPdf(sheetEl, sheet){
@@ -126,7 +218,7 @@ async function exportSheetAsPdf(sheetEl, sheet){
     position -= pageH;
     if(remaining > 0) pdf.addPage();
   }
-  const filename = sheet.nome ? `Ficha_${sanitizeFilename(sheet.nome)}` : `ficha_${sheet.id}`;
+  const filename = sheet.name ? `Ficha_${sanitizeFilename(sheet.name)}` : `ficha_${sheet.id}`;
   pdf.save(filename + ".pdf");
 }
 
@@ -146,35 +238,10 @@ function countDamage(arr){
 }
 
 /* =============================
-   Status calc: mov -> correr -> saltar + total (exceto correr/saltar)
-============================= */
-function recalcStatus(sheet){
-  const list = sheet.status;
-  const movIdx = list.findIndex(x => (x.nome||"").toLowerCase()==="mov");
-  const correrIdx = list.findIndex(x => (x.nome||"").toLowerCase()==="correr");
-  const saltarIdx = list.findIndex(x => (x.nome||"").toLowerCase()==="saltar");
-
-  const mov = movIdx>=0 ? toNum(list[movIdx].valor) : 0;
-  const correr = mov*3;
-  const saltar = correr/5;
-
-  if(correrIdx>=0) list[correrIdx].valor = fmt2(correr);
-  if(saltarIdx>=0) list[saltarIdx].valor = fmt2(saltar);
-
-  let total = 0;
-  for(const it of list){
-    const n = (it.nome||"").toLowerCase();
-    if(n==="correr" || n==="saltar") continue;
-    total += toNum(it.valor);
-  }
-  return total;
-}
-
-/* =============================
    Armor sum
 ============================= */
 function armorSum(pb){
-  return (pb?.cabeca||0)+(pb?.torso||0)+(pb?.bracoD||0)+(pb?.bracoE||0)+(pb?.pernaD||0)+(pb?.pernaE||0);
+  return (pb?.head||0)+(pb?.torso||0)+(pb?.rightArm||0)+(pb?.leftArm||0)+(pb?.rightLeg||0)+(pb?.leftLeg||0);
 }
 
 /* =============================
@@ -184,13 +251,13 @@ const allFichasEl = document.getElementById("allFichas");
 
 function renderAll(){
   allFichasEl.innerHTML = "";
-  for(const sheet of STATE.sheets){
+  for(const sheet of appState.sheets){
     allFichasEl.appendChild(renderSheet(sheet));
   }
 }
 
 function getSheetById(id){
-  return STATE.sheets.find(s => s.id === id);
+  return appState.sheets.find(s => s.id === id);
 }
 
 /* -----------------------------
@@ -198,8 +265,8 @@ function getSheetById(id){
 ------------------------------*/
 function renderSheet(sheet){
   // normaliza
-  if(!sheet.armorPB) sheet.armorPB = { cabeca:0, torso:0, bracoD:0, bracoE:0, pernaD:0, pernaE:0 };
-  if(!Array.isArray(sheet.track) || sheet.track.length!==40) sheet.track = Array(40).fill(false);
+  if(!sheet.armorSP) sheet.armorSP = { head:0, torso:0, rightArm:0, leftArm:0, rightLeg:0, leftLeg:0 };
+  if(!Array.isArray(sheet.damageTrack) || sheet.damageTrack.length!==40) sheet.damageTrack = Array(40).fill(false);
 
   const wrap = document.createElement("div");
   wrap.className = "sheet";
@@ -233,8 +300,8 @@ function renderSheet(sheet){
   delBtn.type="button";
   delBtn.textContent="Excluir ficha";
   delBtn.addEventListener("click", () => {
-    STATE.sheets = STATE.sheets.filter(s => s.id !== sheet.id);
-    scheduleSave();
+    appState.sheets = appState.sheets.filter(s => s.id !== sheet.id);
+    scheduleStateSave();
     renderAll();
   });
 
@@ -262,12 +329,12 @@ function renderSheet(sheet){
 
   const nomeInput = document.createElement("input");
   nomeInput.className="text-field";
-  nomeInput.value = sheet.nome || "";
+  nomeInput.value = sheet.name || "";
   nomeInput.placeholder="Digite o nome...";
   nomeInput.style.marginBottom="6px";
   nomeInput.addEventListener("input", () => {
-    sheet.nome = nomeInput.value;
-    scheduleSave();
+    sheet.name = nomeInput.value;
+    scheduleStateSave();
   });
 
   bigImage.appendChild(nomeHeader);
@@ -282,12 +349,12 @@ function renderSheet(sheet){
 
   const papelInput = document.createElement("input");
   papelInput.className="text-field";
-  papelInput.value = sheet.papel || "";
+  papelInput.value = sheet.role || "";
   papelInput.placeholder="Digite...";
   papelInput.style.marginBottom="6px";
   papelInput.addEventListener("input", () => {
-    sheet.papel = papelInput.value;
-    scheduleSave();
+    sheet.role = papelInput.value;
+    scheduleStateSave();
   });
 
   bigImage.appendChild(papelHeader);
@@ -318,7 +385,7 @@ function renderSheet(sheet){
     dropImg.src = dataUrl;
     dropImg.style.display="block";
     dropX.style.display="none";
-    scheduleSave();
+    scheduleStateSave();
   });
 
   const imgActions = document.createElement("div");
@@ -339,7 +406,7 @@ function renderSheet(sheet){
     dropImg.src=dataUrl;
     dropImg.style.display="block";
     dropX.style.display="none";
-    scheduleSave();
+    scheduleStateSave();
   });
 
   const clearMain = document.createElement("button");
@@ -352,7 +419,7 @@ function renderSheet(sheet){
     dropImg.removeAttribute("src");
     dropImg.style.display="none";
     dropX.style.display="block";
-    scheduleSave();
+    scheduleStateSave();
   });
 
   const imgHint = document.createElement("div");
@@ -388,7 +455,7 @@ function renderSheet(sheet){
   addSkill.textContent="+";
   addSkill.addEventListener("click", ()=>{
     sheet.skills.push({ nome:"", valor:"" });
-    scheduleSave();
+    scheduleStateSave();
     renderAll(); // estrutural
   });
 
@@ -408,10 +475,10 @@ function renderSheet(sheet){
   vitVal.className="val";
   vitVal.contentEditable="true";
   vitVal.spellcheck=false;
-  vitVal.textContent = sheet.vit ?? "0";
+  vitVal.textContent = sheet.vitality ?? "0";
   vitVal.addEventListener("input", ()=>{
-    sheet.vit = vitVal.textContent.trim();
-    scheduleSave();
+    sheet.vitality = vitVal.textContent.trim();
+    scheduleStateSave();
   });
   vit.appendChild(vitVal);
 
@@ -421,10 +488,10 @@ function renderSheet(sheet){
   mtcVal.className="val";
   mtcVal.contentEditable="true";
   mtcVal.spellcheck=false;
-  mtcVal.textContent = sheet.mtc ?? "0";
+  mtcVal.textContent = sheet.btm ?? "0";
   mtcVal.addEventListener("input", ()=>{
-    sheet.mtc = mtcVal.textContent.trim();
-    scheduleSave();
+    sheet.btm = mtcVal.textContent.trim();
+    scheduleStateSave();
   });
   mtc.appendChild(mtcVal);
 
@@ -460,8 +527,8 @@ function renderSheet(sheet){
   addStatus.className="plus no-export";
   addStatus.textContent="+";
   addStatus.addEventListener("click", ()=>{
-    sheet.status.push({ nome:"", valor:"", fixed:false });
-    scheduleSave();
+    sheet.stats.push({ name:"", value:"", isFixed:false });
+    scheduleStateSave();
     renderAll(); // estrutural
   });
 
@@ -484,8 +551,8 @@ function renderSheet(sheet){
   addEquip.className="plus no-export";
   addEquip.textContent="+";
   addEquip.addEventListener("click", ()=>{
-    sheet.equips.push({ nome:"", descricao:"", image:null });
-    scheduleSave();
+    sheet.equipment.push({ nome:"", descricao:"", image:null });
+    scheduleStateSave();
     renderAll(); // estrutural
   });
 
@@ -520,16 +587,16 @@ function renderSheet(sheet){
     if(cb.classList.contains("box") && cb.dataset.absIndex){
       const abs = Number(cb.dataset.absIndex);
       const checked = cb.checked;
-      applyGlobalDamage(sheet.track, abs, checked);
+      applyGlobalDamage(sheet.damageTrack, abs, checked);
 
       // Update all checkboxes in THIS track without re-render:
       const boxes = wrap.querySelectorAll(`input.box[data-sheet="${sheet.id}"]`);
       boxes.forEach(b => {
         const i = Number(b.dataset.absIndex);
-        b.checked = !!sheet.track[i];
+        b.checked = !!sheet.damageTrack[i];
       });
 
-      scheduleSave();
+      scheduleStateSave();
       updateBadges(sheet, wrap);
     }
   });
@@ -541,7 +608,7 @@ function renderSheet(sheet){
    Badges
 ------------------------------*/
 function updateBadges(sheet, sheetEl){
-  const total = recalcStatus(sheet); // updates correr/saltar in state too
+  const total = updateMovementAndTotalStats(sheet); // updates correr/saltar in state too
   // reflect correr/saltar and total in DOM if present
   const statusBox = sheetEl.querySelector('[data-list="status"]');
   if(statusBox){
@@ -550,19 +617,19 @@ function updateBadges(sheet, sheetEl){
       const name = card.querySelector('.text-field.grow')?.value?.toLowerCase?.() || "";
       const valInput = card.querySelector('.text-field.small');
       if(!valInput) continue;
-      if(name === "correr"){
-        valInput.value = sheet.status.find(s => s.nome.toLowerCase()==="correr")?.valor ?? "";
+      if(name === "run"){
+        valInput.value = sheet.stats.find(s => s.name.toLowerCase()==="run")?.value ?? "";
       }
-      if(name === "saltar"){
-        valInput.value = sheet.status.find(s => s.nome.toLowerCase()==="saltar")?.valor ?? "";
+      if(name === "leap"){
+        valInput.value = sheet.stats.find(s => s.name.toLowerCase()==="leap")?.value ?? "";
       }
     }
     const totalVal = statusBox.querySelector('input[data-total="1"]');
     if(totalVal) totalVal.value = fmt2(total);
   }
 
-  const dmg = countDamage(sheet.track);
-  const arm = armorSum(sheet.armorPB);
+  const dmg = countDamage(sheet.damageTrack);
+  const arm = armorSum(sheet.armorSP);
 
   const bTotal = sheetEl.querySelector('[data-badge="total"]');
   const bDmg = sheetEl.querySelector('[data-badge="dmg"]');
@@ -604,7 +671,7 @@ function renderTrack(sheet){
       const cb = document.createElement("input");
       cb.type="checkbox";
       cb.className="box";
-      cb.checked = !!sheet.track[abs];
+      cb.checked = !!sheet.damageTrack[abs];
       cb.dataset.absIndex = String(abs);
       cb.dataset.sheet = sheet.id; // helps find within sheet
       boxes.appendChild(cb);
@@ -708,11 +775,11 @@ function renderArmor(sheet, sheetEl){
     const inp=document.createElement("input");
     inp.type="number";
     inp.step="1";
-    inp.value = String(sheet.armorPB?.[h.key] ?? 0);
+    inp.value = String(sheet.armorSP?.[h.key] ?? 0);
 
     inp.addEventListener("input", ()=>{
-      sheet.armorPB[h.key] = toNum(inp.value);
-      scheduleSave();
+      sheet.armorSP[h.key] = toNum(inp.value);
+      scheduleStateSave();
       updateBadges(sheet, sheetEl);
     });
 
@@ -732,24 +799,24 @@ function renderStatusList(sheet, container, sheetEl){
   container.innerHTML = "";
 
   // ensure auto fields are correct before initial render
-  const total = recalcStatus(sheet);
-  scheduleSave();
+  const total = updateMovementAndTotalStats(sheet);
+  scheduleStateSave();
 
-  sheet.status.forEach((item, i)=>{
-    const nLower = (item.nome||"").toLowerCase();
-    const isAuto = item.readonly || nLower==="correr" || nLower==="saltar";
+  sheet.stats.forEach((item, i)=>{
+    const nLower = (item.name||"").toLowerCase();
+    const isAuto = item.isReadonly || nLower==="run" || nLower==="leap";
 
     const card = document.createElement("div");
     card.className="card";
 
-    if(!item.fixed){
+    if(!item.isFixed){
       const rm = document.createElement("button");
       rm.className="remove no-export";
       rm.type="button";
       rm.textContent="–";
       rm.addEventListener("click", ()=>{
-        sheet.status.splice(i,1);
-        scheduleSave();
+        sheet.stats.splice(i,1);
+        scheduleStateSave();
         renderAll();
       });
       card.appendChild(rm);
@@ -760,18 +827,18 @@ function renderStatusList(sheet, container, sheetEl){
 
     const nome = document.createElement("input");
     nome.className="text-field grow";
-    nome.value=item.nome;
+    nome.value=item.name;
     nome.placeholder="Nome...";
-    if(item.fixed){ nome.readOnly=true; nome.style.opacity="0.9"; }
+    if(item.isFixed){ nome.readOnly=true; nome.style.opacity="0.9"; }
     nome.addEventListener("input", ()=>{
-      item.nome = nome.value;
-      scheduleSave();
+      item.name = nome.value;
+      scheduleStateSave();
       updateBadges(sheet, sheetEl);
     });
 
     const val = document.createElement("input");
     val.className="text-field small";
-    val.value=item.valor;
+    val.value=item.value;
     val.placeholder="0";
     if(isAuto){
       val.readOnly=true;
@@ -779,10 +846,10 @@ function renderStatusList(sheet, container, sheetEl){
       val.style.opacity="0.95";
     }
     val.addEventListener("input", ()=>{
-      item.valor = val.value;
+      item.value = val.value;
       // updates correr/saltar/total in place
       updateBadges(sheet, sheetEl);
-      scheduleSave();
+      scheduleStateSave();
     });
 
     line.appendChild(nome);
@@ -832,7 +899,7 @@ function renderSkillsList(sheet, container, sheetEl){
     rm.textContent="–";
     rm.addEventListener("click", ()=>{
       sheet.skills.splice(i,1);
-      scheduleSave();
+      scheduleStateSave();
       renderAll();
     });
 
@@ -845,7 +912,7 @@ function renderSkillsList(sheet, container, sheetEl){
     nome.placeholder="Perícia...";
     nome.addEventListener("input", ()=>{
       sk.nome = nome.value;
-      scheduleSave();
+      scheduleStateSave();
     });
 
     const val=document.createElement("input");
@@ -854,7 +921,7 @@ function renderSkillsList(sheet, container, sheetEl){
     val.placeholder="0";
     val.addEventListener("input", ()=>{
       sk.valor = val.value;
-      scheduleSave();
+      scheduleStateSave();
     });
 
     card.appendChild(rm);
@@ -870,7 +937,7 @@ function renderSkillsList(sheet, container, sheetEl){
 ============================= */
 function renderEquipList(sheet, container, sheetEl){
   container.innerHTML="";
-  sheet.equips.forEach((eq, i)=>{
+  sheet.equipment.forEach((eq, i)=>{
     const card=document.createElement("div");
     card.className="card tall";
     card.dataset.equipIndex=i;
@@ -883,8 +950,8 @@ function renderEquipList(sheet, container, sheetEl){
     rm.type="button";
     rm.textContent="–";
     rm.addEventListener("click", ()=>{
-      sheet.equips.splice(i,1);
-      scheduleSave();
+      sheet.equipment.splice(i,1);
+      scheduleStateSave();
       renderAll();
     });
     card.appendChild(rm);
@@ -906,7 +973,7 @@ function renderEquipList(sheet, container, sheetEl){
     nomeName.style.marginBottom="0";
     nomeName.addEventListener("input", ()=>{
       eq.nome = nomeName.value;
-      scheduleSave();
+      scheduleStateSave();
     });
     nomeName.addEventListener("click", (e)=>{
       e.stopPropagation();
@@ -939,7 +1006,7 @@ function renderEquipList(sheet, container, sheetEl){
       toggle.textContent = eq.collapsed ? "+" : "−";
       content.classList.toggle("hidden");
       updateDescPreview();
-      scheduleSave();
+      scheduleStateSave();
     });
 
     // Card Content (expandível)
@@ -1006,7 +1073,7 @@ function renderEquipList(sheet, container, sheetEl){
         xBox.style.height = Math.min(calculatedHeight, 300) + "px";
       };
       
-      scheduleSave();
+      scheduleStateSave();
     });
 
     const clearBtn=document.createElement("button");
@@ -1022,7 +1089,7 @@ function renderEquipList(sheet, container, sheetEl){
       img.style.display="none";
       x.style.display="block";
       xBox.style.height="90px";
-      scheduleSave();
+      scheduleStateSave();
     });
 
     actions.appendChild(uploadLabel);
@@ -1035,7 +1102,7 @@ function renderEquipList(sheet, container, sheetEl){
     desc.addEventListener("input", ()=>{
       eq.descricao = desc.value;
       updateDescPreview();
-      scheduleSave();
+      scheduleStateSave();
     });
 
     content.appendChild(xBox);
@@ -1056,20 +1123,20 @@ function renderEquipList(sheet, container, sheetEl){
    Boot + Global controls
 ============================= */
 document.getElementById("addSheet").addEventListener("click", ()=>{
-  STATE.sheets.push(makeEmptySheet());
-  scheduleSave();
+  appState.sheets.push(createEmptySheet());
+  scheduleStateSave();
   renderAll();
 });
 
 document.getElementById("clearAll").addEventListener("click", ()=>{
-  localStorage.removeItem(STORAGE_KEY);
-  STATE = { sheets: [] };
-  STATE.sheets.push(makeEmptySheet());
-  scheduleSave();
+  localStorage.removeItem(CHARACTER_SHEETS_STORAGE_KEY);
+  appState = { sheets: [] };
+  appState.sheets.push(createEmptySheet());
+  scheduleStateSave();
   renderAll();
 });
 
 (function init(){
-  if(STATE.sheets.length === 0) STATE.sheets.push(makeEmptySheet());
+  if(appState.sheets.length === 0) appState.sheets.push(createEmptySheet());
   renderAll();
 })();
