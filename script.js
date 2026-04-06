@@ -10,6 +10,10 @@ let appState = loadApplicationState();
 /** @type {number|null} - Timer reference for the debounce saving function */
 let saveDebounceTimer = null;
 
+/**
+ * Retrieves the stored data from LocalStorage and parses it.
+ * @returns {object} The parsed state or a default empty sheets structure
+ */
 function loadApplicationState(){
   try {
     const rawData = localStorage.getItem(CHARACTER_SHEETS_STORAGE_KEY);
@@ -108,56 +112,108 @@ const LEAP_DIVISOR = 4;
  */
 
 function updateMovementAndTotalStats(sheet){
-  const statsList = sheet.stats;
+  const stats = sheet.stats;
 
-  // 1. Find indices for necessary stats
-  const maIndex = statsList.findIndex(x => (x.name||"").toLowerCase()==="ma");
-  const runIndex = statsList.findIndex(x => (x.name||"").toLowerCase()==="run");
-  const leapIndex = statsList.findIndex(x => (x.name||"").toLowerCase()==="leap");
+  // 1. Search objects directly
+  const maStat = findStat(stats, "MA");
+  const runStat = findStat(stats, "RUN")
+  const leapStat = findStat(stats, "LEAP");
 
   // 2. Calculate Run and Leap based on Movement Allowance (MA)
-  // toNum() converts strings//nulls to a safe number
-  const movementAllowance = maIndex >= 0 ? toNum(statsList[maIndex].value) : 0;
+  // parseToSafeNumber() converts strings//nulls to a safe number
+  const movementAllowance = maStat ? parseToSafeNumber(maStat.value) : 0;
 
   const runValue = movementAllowance * RUN_MULTIPLIER;
   const leapValue = runValue / LEAP_DIVISOR;
 
   // 3. Update the sheet values using the formatting helper (fmt2)
-  if(runIndex >= 0) {
-    statsList[runIndex].value = fmt2(runValue);
-  } 
-  if(leapIndex >= 0) {
-    statsList[leapIndex].value = fmt2(leapValue);
-  } 
+  if (runStat) runStat.value = formatToTwoDecimals(runValue);
+  if (leapStat) leapStat.value = formatToTwoDecimals(leapValue);
 
   // 4. Calculate the Total Point Sum
   // This is useful for character creation (e.g., checking if the player spent 60 points)
-  let attributeTotal = 0;
-
-  for(const stat of statsList){
-    const statName = (stat.name||"").toLowerCase();
-
-    // Skip derived stats to avoid double-counting or including non-base points
-    if(statName === "run" || statName === "leap") {
-      continue;
-    } 
-
-    attributeTotal += toNum(stat.value);
-  }
-
-  return attributeTotal;
+  return stats.reduce((total, stat) => {
+    const name = (stat.name || "").toLowerCase();
+    if (name === "run" || name === "leap") return total;
+    return total + parseToSafeNumber(stat.value);
+  }, 0);
 }
 
 /* =============================
-   Helpers
+  WOUND MANAGEMENT (Damage Trackging)
 ============================= */
-function toNum(v){
-  const n = Number(String(v ?? "").replace(",", "."));
-  return Number.isFinite(n) ? n : 0;
+
+/**
+ * Updates the wound track based on the clicked square.
+ * If checking: fills all squares from the start up to the index.
+ * If unchecking: clears all squares from the index to the end.
+ * @param {boolean[]} damageArray - The array of 40 booleans representing wounds.
+ * @param {number} selectedIndex - The index of the square that was clicked
+ * @param {boolean} isChecked - The new state of the clicked square
+ */
+function updateWoundTrack(damageArray, selectedIndex, isChecked){
+  if(isChecked){
+    // Fill everything from 0 to the clicked index
+    damageArray.fill(true, 0, selectedIndex + 1);
+  } else {
+    // Clear everything from the clicked index to the very end
+    damageArray.fill(false, selectedIndex, damageArray.length);
+  }
 }
-function fmt2(v){
-  return (Math.round(v*100)/100).toString();
+
+/**
+ * Counts how many damage squares are currently marked as true
+ * @param {boolean[]} damageArray - The array of wounds 
+ * @returns {number} The total amount of damage taken.
+ */
+function getTotalDamageCount(damageArray) {
+  // Using filter().length is a clean, modern way to count specific values
+  return damageArray.filter(isMarked => isMarked === true).length;
 }
+
+/* =============================
+  UTILITY HELPERS (Math & Formatting)
+============================= */
+/**
+ * Safely finds a stat object by its name, ignoring case.
+ * @param {Array} list - The stats array
+ * @param {string} name - The name to search for.
+ * @returns {object|null} The stat object or null if not found.
+ */
+function findStat (list, name) {
+  if (!Array.isArray(list)) return null;
+
+  return list.find(s => (s.name || "").toLowerCase() === name.toLowerCase()) || null;
+}
+
+/**
+ * Converts any value to a safe number.
+ * Handles comma-to-dot replacement and null/undefined values
+ * @param {ant} value 
+ * @returns {number} The converted number or 0 if invalid
+ */
+function parseToSafeNumber(value) {
+  // 1. Convert to string and handle null/undefined using Nullish Coalescing (??)
+  // 2. Replace comma with dot to support different decimal formats (e.g., 1,5 -> 1.5)
+  const sanitizedValue = String(value ?? "").replace(",", ".");
+
+  const parsedNumber = Number(sanitizedValue);
+
+  // 3. Check if it's a real number (not NaN or Infinity)
+  return Number.isFinite(parsedNumber) ? parsedNumber : 0;
+}
+
+/**
+ * 
+ * @param {number} value 
+ * @returns 
+ */
+function formatToTwoDecimals(value) {
+  // Standard rounding logic: (value * 100) / 100
+  // Example: 1.555 * 100 = 155.5 -> round = 156 -> /100 = 1.56
+  return (Math.round(value * 100) / 100).toString();
+}
+
 function downloadDataUrl(dataUrl, filename){
   const a = document.createElement('a');
   a.href = dataUrl;
@@ -220,21 +276,6 @@ async function exportSheetAsPdf(sheetEl, sheet){
   }
   const filename = sheet.name ? `Ficha_${sanitizeFilename(sheet.name)}` : `ficha_${sheet.id}`;
   pdf.save(filename + ".pdf");
-}
-
-/* =============================
-   Damage global: marcar 0..idx / desmarcar idx..fim
-============================= */
-function applyGlobalDamage(arr, index, checked){
-  if(checked){
-    for(let i=0;i<=index;i++) arr[i]=true;
-  }else{
-    for(let i=index;i<arr.length;i++) arr[i]=false;
-  }
-}
-function countDamage(arr){
-  let c=0; for(const b of arr) if(b) c++;
-  return c;
 }
 
 /* =============================
@@ -587,7 +628,7 @@ function renderSheet(sheet){
     if(cb.classList.contains("box") && cb.dataset.absIndex){
       const abs = Number(cb.dataset.absIndex);
       const checked = cb.checked;
-      applyGlobalDamage(sheet.damageTrack, abs, checked);
+      updateWoundTrack(sheet.damageTrack, abs, checked);
 
       // Update all checkboxes in THIS track without re-render:
       const boxes = wrap.querySelectorAll(`input.box[data-sheet="${sheet.id}"]`);
@@ -625,17 +666,17 @@ function updateBadges(sheet, sheetEl){
       }
     }
     const totalVal = statusBox.querySelector('input[data-total="1"]');
-    if(totalVal) totalVal.value = fmt2(total);
+    if(totalVal) totalVal.value = formatToTwoDecimals(total);
   }
 
-  const dmg = countDamage(sheet.damageTrack);
+  const dmg = getTotalDamageCount(sheet.damageTrack);
   const arm = armorSum(sheet.armorSP);
 
   const bTotal = sheetEl.querySelector('[data-badge="total"]');
   const bDmg = sheetEl.querySelector('[data-badge="dmg"]');
   const bArm = sheetEl.querySelector('[data-badge="arm"]');
 
-  if(bTotal) bTotal.textContent = `TOTAL: ${fmt2(total)}`;
+  if(bTotal) bTotal.textContent = `TOTAL: ${formatToTwoDecimals(total)}`;
   if(bDmg) bDmg.textContent = `DANO: ${dmg}/40`;
   if(bArm) bArm.textContent = `PB: ${arm}`;
 }
@@ -778,7 +819,7 @@ function renderArmor(sheet, sheetEl){
     inp.value = String(sheet.armorSP?.[h.key] ?? 0);
 
     inp.addEventListener("input", ()=>{
-      sheet.armorSP[h.key] = toNum(inp.value);
+      sheet.armorSP[h.key] = parseToSafeNumber(inp.value);
       scheduleStateSave();
       updateBadges(sheet, sheetEl);
     });
@@ -874,7 +915,7 @@ function renderStatusList(sheet, container, sheetEl){
   const totalVal = document.createElement("input");
   totalVal.className="text-field small auto";
   totalVal.readOnly=true;
-  totalVal.value=fmt2(total);
+  totalVal.value=formatToTwoDecimals(total);
   totalVal.style.fontWeight="1000";
   totalVal.dataset.total="1";
 
