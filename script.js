@@ -140,6 +140,33 @@ function updateMovementAndTotalStats(sheet){
 }
 
 /* =============================
+  Armor sum
+============================= */
+/**
+ * Sums the Stopping Power (SP) of all body parts
+ * @param {object} armorSP - Object containing SP values for each body part.
+ * @returns {number} The total sum of armor protection
+ */
+function armorSum(armorSP){
+  // 1. Safety check: if armorSP is null or undefined, return 0
+  if (!armorSP) return 0;
+
+  // 2. Destructuring the object for cleaner access
+  // This allows us to use 'head' instead of 'armorSP.head'
+  const {
+    head = 0,
+    torso = 0,
+    rightArm = 0,
+    leftArm = 0,
+    rightLeg = 0,
+    leftLeg = 0
+  } = armorSP;
+
+  // 3. Return the sum
+  return head + torso + rightArm + leftArm + rightLeg + leftLeg;
+}
+
+/* =============================
   WOUND MANAGEMENT (Damage Trackging)
 ============================= */
 
@@ -189,7 +216,7 @@ function findStat (list, name) {
 /**
  * Converts any value to a safe number.
  * Handles comma-to-dot replacement and null/undefined values
- * @param {ant} value 
+ * @param {any} value - The input to be converted
  * @returns {number} The converted number or 0 if invalid
  */
 function parseToSafeNumber(value) {
@@ -204,9 +231,9 @@ function parseToSafeNumber(value) {
 }
 
 /**
- * 
- * @param {number} value 
- * @returns 
+ * Rounds a number to a maximum of 2 decimal places and returns it as a string.
+ * @param {number} value - The number to format.
+ * @returns {string} The formatted number.
  */
 function formatToTwoDecimals(value) {
   // Standard rounding logic: (value * 100) / 100
@@ -214,44 +241,98 @@ function formatToTwoDecimals(value) {
   return (Math.round(value * 100) / 100).toString();
 }
 
-function downloadDataUrl(dataUrl, filename){
-  const a = document.createElement('a');
-  a.href = dataUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-function dataURLFromFile(file){
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 /* =============================
-   Export
+  Export
 ============================= */
-function sanitizeFilename(filename){
-  // Remove/substitui caracteres inválidos no Windows: < > : " / \ | ? *
-  return filename
-    .replace(/[<>:"|?*/\\]/g, "")      // Remove caracteres inválidos
-    .replace(/\s+/g, "_")               // Substitui espaços por underscore
-    .trim()                             // Remove espaços nas pontas
-    .slice(0, 200);                     // Limita a 200 caracteres
+/**
+ * Sanitizes a string to be used as a safe filename across different OS.
+ * Removes invalid characters, replaces spaces with underscores, and limits length
+ * @param {string} fileName - The original filename (e.g., Character Name).
+ * @returns {string} The sanitized, filesystem-friendly filename
+ */
+function formatSafeFileName(fileName){
+  // 1. Safety check: Ensure we are working with a string
+  const input = String(fileName ?? "character_sheet");
+  return input
+  // 2. Remove characters that are illegal in Windows/Linux/MacOS: < > : " / \ | ? *
+  // The 'g' flag means "global" (replace all occurrences)
+  .replace(/[<>:"|?*/\\]/g, "")
+
+  //3. Replace one or more spaces (white space) with a single underscore
+  // \s+ matches one or more space characters
+  .replace(/\s+/g, "_")
+
+  // 4. Remove leading and trailing spaces or underscores
+  .trim()
+
+  // 5. Limit the length to 200 characters to prevent filesystem errors
+  .slice(0, 200);
 }
 
-async function exportSheetAsJpeg(sheetEl, sheet){
-  const hidden = sheetEl.querySelectorAll(".no-export");
-  hidden.forEach(el => el.style.display = "none");
-  const canvas = await html2canvas(sheetEl, { scale: 2, backgroundColor: "#ffffff" });
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
-  hidden.forEach(el => el.style.display = "");
-  const filename = sheet.name ? `Ficha_${sanitizeFilename(sheet.name)}` : `ficha_${sheet.id}`;
-  downloadDataUrl(dataUrl, filename + ".jpg");
+/**
+ * Triggers a browser download for a given data URL.
+ * Creates a hidden anchor element, simulates a click, and removes it.
+ * @param {string} dataUrl - The base64 or object URL of the file.
+ * @param {string} fileName - The default name for the downloaded file.
+ */
+function triggerFileDownload(dataUrl, fileName){
+  // 1. Create a virtual 'anchor' (<a>) element in memory
+  const downloadLink = document.createElement('a');
+
+  // 2. Set the source and the target filename
+  downloadLink.href = dataUrl;
+  downloadLink.download = fileName;
+
+  // 3. Temporarily add to the document to make it "clickable" in some browsers
+  document.body.appendChild(downloadLink);
+
+  // 4. Programmatically trigger the click event
+  downloadLink.click();
+
+  // 5. Clean up by removing the element from the DOM immediately
+  downloadLink.remove();
 }
+
+/**
+ * Captures a specific HTML element and exports it as a JPEG image.
+ * Temporarily hides elements marked with '.no-export' during capture
+ * @param {HTMLElement} sheetElement - The DOM element to be captured (the sheet)
+ * @param {object} characterData - The character object to retrieve name/id. 
+ */
+async function exportCharacterSheetAsJpeg(sheetElement, characterData) {
+  // 1. Identify and hide elements that shouldn't apper in the photo (e.g., buttons)
+  const elementsToHide = sheetElement.querySelectorAll(".no-export");
+  elementsToHide.forEach(el => el.style.display = "none");
+
+  try {
+    // 2. Generate the Canvas using html2canvas library
+    // scale: 2 improves image quality (DPI)
+    const canvas = await html2canvas(sheetElement, { 
+      scale: 2, 
+      backgroundColor: "#ffffff",
+      useCORS: true // Useful if loading external images
+    });
+
+    // 3. Convert the Canvas to a JPEG Data URL (95% quality)
+    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.95);
+
+    // 4. Restore visibility of the hidden elements
+    elementsToHide.forEach(el => el.style.display = "");
+
+    // 5. Generate a safe filename
+    const baseName = characterData.name 
+    ? `Cyberpunk_Sheet_${formatSafeFileName(characterData.name)}` 
+    : `Cyberpunk_Sheet_${characterData.id}`;
+
+    // 6. Trigger the actual download
+    triggerFileDownload(imageDataUrl, `${baseName}.jpg`);
+  } catch (error) {
+    console.error("Failed to export sheet as JPEG:", error);
+    // Ensure UI elements ares= restored eve if an error occurs
+    elementsToHide.forEach(el => el.style.display = "");
+  }
+}
+
 async function exportSheetAsPdf(sheetEl, sheet){
   const hidden = sheetEl.querySelectorAll(".no-export");
   hidden.forEach(el => el.style.display = "none");
@@ -274,15 +355,17 @@ async function exportSheetAsPdf(sheetEl, sheet){
     position -= pageH;
     if(remaining > 0) pdf.addPage();
   }
-  const filename = sheet.name ? `Ficha_${sanitizeFilename(sheet.name)}` : `ficha_${sheet.id}`;
+  const filename = sheet.name ? `Ficha_${formatSafeFileName(sheet.name)}` : `ficha_${sheet.id}`;
   pdf.save(filename + ".pdf");
 }
 
-/* =============================
-   Armor sum
-============================= */
-function armorSum(pb){
-  return (pb?.head||0)+(pb?.torso||0)+(pb?.rightArm||0)+(pb?.leftArm||0)+(pb?.rightLeg||0)+(pb?.leftLeg||0);
+function dataURLFromFile(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 /* =============================
@@ -334,7 +417,7 @@ function renderSheet(sheet){
   jpgBtn.className="btn";
   jpgBtn.type="button";
   jpgBtn.textContent="Exportar JPEG";
-  jpgBtn.addEventListener("click", () => exportSheetAsJpeg(wrap, sheet));
+  jpgBtn.addEventListener("click", () => exportCharacterSheetAsJpeg(wrap, sheet));
 
   const delBtn = document.createElement("button");
   delBtn.className="btn";
