@@ -321,8 +321,8 @@ async function exportCharacterSheetAsJpeg(sheetElement, characterData) {
 
     // 5. Generate a safe filename
     const baseName = characterData.name 
-    ? `Cyberpunk_Sheet_${formatSafeFileName(characterData.name)}` 
-    : `Cyberpunk_Sheet_${characterData.id}`;
+      ? `Cyberpunk_Sheet_${formatSafeFileName(characterData.name)}` 
+      : `Cyberpunk_Sheet_${characterData.id}`;
 
     // 6. Trigger the actual download
     triggerFileDownload(imageDataUrl, `${baseName}.jpg`);
@@ -333,53 +333,116 @@ async function exportCharacterSheetAsJpeg(sheetElement, characterData) {
   }
 }
 
-async function exportSheetAsPdf(sheetEl, sheet){
-  const hidden = sheetEl.querySelectorAll(".no-export");
-  hidden.forEach(el => el.style.display = "none");
-  const canvas = await html2canvas(sheetEl, { scale: 2, backgroundColor: "#ffffff" });
-  const imgData = canvas.toDataURL("image/jpeg", 0.95);
-  hidden.forEach(el => el.style.display = "");
+/**
+ * Captures the sheet as an image and embeds it into a multi-page PDF
+ * Uses a coordinate shift logic to handle sheets longer than a single A4 page
+ * @param {HTMLElement} sheetElement - The DOM element to capture 
+ * @param {object} characterData - The character object for naming the file.
+ */
+async function exportCharacterSheetAsPdf(sheetElement, characterData) {
+  // 1. Preparation: Hide non-exportable elements
+  const elementsToHide = sheetElement.querySelectorAll(".no-export");
+  elementsToHide.forEach(el => el.style.display = "none");
 
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF("p", "mm", "a4");
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const imgW = pageW;
-  const imgH = (canvas.height * imgW) / canvas.width;
+  try {
+    // 2. Capture the sheet as a High-Quality Canvas
+    const canvas = await html2canvas(sheetElement, { 
+      scale: 2, 
+      backgroundColor: "#ffffff", 
+      useCORS: true 
+    });
+    const imageData = canvas.toDataURL("image/jpeg", 0.95);
 
-  let remaining = imgH;
-  let position = 0;
-  while(remaining > 0){
-    pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
-    remaining -= pageH;
-    position -= pageH;
-    if(remaining > 0) pdf.addPage();
-  }
-  const filename = sheet.name ? `Ficha_${formatSafeFileName(sheet.name)}` : `ficha_${sheet.id}`;
-  pdf.save(filename + ".pdf");
+    // Restore visibility immediately after capture
+    elementsToHide.forEach(el => el.style.display = "");
+
+    // 3. Initialize jsPDF (p = portrait, mm = millimeters, a4 = paper size)
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("p", "mm", "a4");
+
+    // 4. Calculate Dimensions
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    // Calculate the image height relative to the A4 width
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    // 5. Multi-page Logic (The "Sliding Window" technique)
+    let heightLeft = imgHeight;
+    let verticalPosition = 0;
+
+    while(heightLeft > 0) {
+      // Add the SAME image, but shifted upwards (verticalPosition becomes more negative)
+      pdf.addImage(imageData, "JPEG", 0, verticalPosition, imgWidth, imgHeight);
+
+      heightLeft -= pageHeight;
+      verticalPosition -= pageHeight;
+
+      // If there is still image left to show, add a new blank page
+      if(heightLeft > 0) {
+        pdf.addPage();
+      } 
+    }
+
+    // 6. Save the final document
+    const baseName = characterData.name 
+      ? `Cyberpunk_sheet_${formatSafeFileName(characterData.name)}` 
+      : `Cyberpunk_sheet_${characterData.id}`;
+
+    pdf.save(baseName + ".pdf");
+  } catch {error}
+    console.error("Error generating PDF: ", error);
+    elementsToHide.forEach(el => el.style.display = "");
 }
 
-function dataURLFromFile(file){
+/**
+ * Reads a File object and converts it into a Base64 DataURL string.
+ * This is useful for displaying uploaded images immediately in the UI
+ * @param {File} file - The file object from an <input type="file">.
+ * @returns {Promise<string>} A promise that resolves with the DataURL string
+ */
+function convertFileToDataURL(file){
   return new Promise((resolve, reject) => {
+    // 1. Initialize the built-in File Reader
     const reader = new FileReader();
+
+    // 2. Success Handler: When the file is fully read, resolve the promise
     reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
+
+    // 3. Error Handler: If something goes wrong (permissions, corruption), reject
+    reader.onerror = () => reject(new Error("Failed to read file."));
+
+    // 4. Start the reading process as a Data URL (Base64)
     reader.readAsDataURL(file);
   });
 }
 
 /* =============================
-   Render
+  UI RENDERING ENGINE
 ============================= */
-const allFichasEl = document.getElementById("allFichas");
 
-function renderAll(){
-  allFichasEl.innerHTML = "";
-  for(const sheet of appState.sheets){
-    allFichasEl.appendChild(renderSheet(sheet));
+/**
+ * Main container for all character sheet elements in the DOM.
+ */
+const sheetsContainer = document.getElementById("allFichas");
+
+/**
+ * Clears the current UI and rebuilds all character sheets from the application state.
+ * This ensures the view is always synchronized with the data
+ */
+function renderAllSheets(){
+  // 1. "Wipe the slate clean": Removes all existing HTML inside the container
+  sheetsContainer.innerHTML = "";
+
+  // 2. Iterate through each sheet data object in the global state
+  for(const sheetData of appState.sheets) {
+    // 3. Create the physical HTML element for the sheet and inject it into the DOM.
+    sheetsContainer.appendChild(renderSheet(sheetData));
   }
 }
 
+// Check about the using of this function
 function getSheetById(id){
   return appState.sheets.find(s => s.id === id);
 }
@@ -411,7 +474,7 @@ function renderSheet(sheet){
   pdfBtn.className="btn";
   pdfBtn.type="button";
   pdfBtn.textContent="Exportar PDF";
-  pdfBtn.addEventListener("click", () => exportSheetAsPdf(wrap, sheet));
+  pdfBtn.addEventListener("click", () => exportCharacterSheetAsPdf(wrap, sheet));
 
   const jpgBtn = document.createElement("button");
   jpgBtn.className="btn";
@@ -426,7 +489,7 @@ function renderSheet(sheet){
   delBtn.addEventListener("click", () => {
     appState.sheets = appState.sheets.filter(s => s.id !== sheet.id);
     scheduleStateSave();
-    renderAll();
+    renderAllSheets();
   });
 
   btns.appendChild(pdfBtn);
@@ -504,7 +567,7 @@ function renderSheet(sheet){
     e.preventDefault(); drop.style.opacity="1";
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
     if(!file) return;
-    const dataUrl = await dataURLFromFile(file);
+    const dataUrl = await convertFileToDataURL(file);
     sheet.mainImage = dataUrl;
     dropImg.src = dataUrl;
     dropImg.style.display="block";
@@ -525,7 +588,7 @@ function renderSheet(sheet){
   uploadInput.addEventListener("change", async ()=>{
     const file = uploadInput.files && uploadInput.files[0];
     if(!file) return;
-    const dataUrl = await dataURLFromFile(file);
+    const dataUrl = await convertFileToDataURL(file);
     sheet.mainImage = dataUrl;
     dropImg.src=dataUrl;
     dropImg.style.display="block";
@@ -580,7 +643,7 @@ function renderSheet(sheet){
   addSkill.addEventListener("click", ()=>{
     sheet.skills.push({ nome:"", valor:"" });
     scheduleStateSave();
-    renderAll(); // estrutural
+    renderAllSheets(); // estrutural
   });
 
   skillRow.appendChild(skillList);
@@ -653,7 +716,7 @@ function renderSheet(sheet){
   addStatus.addEventListener("click", ()=>{
     sheet.stats.push({ name:"", value:"", isFixed:false });
     scheduleStateSave();
-    renderAll(); // estrutural
+    renderAllSheets(); // estrutural
   });
 
   statusRow.appendChild(statusList);
@@ -677,7 +740,7 @@ function renderSheet(sheet){
   addEquip.addEventListener("click", ()=>{
     sheet.equipment.push({ nome:"", descricao:"", image:null });
     scheduleStateSave();
-    renderAll(); // estrutural
+    renderAllSheets(); // estrutural
   });
 
   equipRow.appendChild(equipList);
@@ -941,7 +1004,7 @@ function renderStatusList(sheet, container, sheetEl){
       rm.addEventListener("click", ()=>{
         sheet.stats.splice(i,1);
         scheduleStateSave();
-        renderAll();
+        renderAllSheets();
       });
       card.appendChild(rm);
     }
@@ -1024,7 +1087,7 @@ function renderSkillsList(sheet, container, sheetEl){
     rm.addEventListener("click", ()=>{
       sheet.skills.splice(i,1);
       scheduleStateSave();
-      renderAll();
+      renderAllSheets();
     });
 
     const line=document.createElement("div");
@@ -1076,7 +1139,7 @@ function renderEquipList(sheet, container, sheetEl){
     rm.addEventListener("click", ()=>{
       sheet.equipment.splice(i,1);
       scheduleStateSave();
-      renderAll();
+      renderAllSheets();
     });
     card.appendChild(rm);
 
@@ -1183,7 +1246,7 @@ function renderEquipList(sheet, container, sheetEl){
     fileInput.addEventListener("change", async ()=>{
       const file = fileInput.files && fileInput.files[0];
       if(!file) return;
-      const dataUrl = await dataURLFromFile(file);
+      const dataUrl = await convertFileToDataURL(file);
       eq.image = dataUrl;
       img.src=dataUrl;
       img.style.display="block";
@@ -1249,7 +1312,7 @@ function renderEquipList(sheet, container, sheetEl){
 document.getElementById("addSheet").addEventListener("click", ()=>{
   appState.sheets.push(createEmptySheet());
   scheduleStateSave();
-  renderAll();
+  renderAllSheets();
 });
 
 document.getElementById("clearAll").addEventListener("click", ()=>{
@@ -1257,10 +1320,10 @@ document.getElementById("clearAll").addEventListener("click", ()=>{
   appState = { sheets: [] };
   appState.sheets.push(createEmptySheet());
   scheduleStateSave();
-  renderAll();
+  renderAllSheets();
 });
 
 (function init(){
   if(appState.sheets.length === 0) appState.sheets.push(createEmptySheet());
-  renderAll();
+  renderAllSheets();
 })();
