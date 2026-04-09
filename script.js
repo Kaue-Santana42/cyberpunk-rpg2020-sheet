@@ -448,6 +448,164 @@ function getSheetById(id){
 }
 
 /* -----------------------------
+  Rendering Helpers
+------------------------------*/
+/**
+ * Creates a stylized section header for the sheet
+ * @param {string} title - The text to display (e.g., "STATUS", "EQUIP")
+ * @param {string} marginBottom - The marginBottom value to be used in the element. Standard value is 4px
+ * @returns {HTMLElement} The header element.
+ */
+function createSectionHeader(title, marginBottom = "4px") {
+  const header = document.createElement("div");
+  header.className = "section-header";
+  header.style.width = "fit-content";
+  header.style.marginBottom = marginBottom;
+  header.textContent = title;
+  return header;
+}
+
+/**
+ * Creates a standardized button with a click event
+ * @param {string} label - Button text.
+ * @param {function} onClick - Function to execute when clicked.
+ * @param {string} extraClass - Optiona class (like 'no-export')
+ * @returns {HTMLElement} The button element
+ */
+function createActionButton(label, onClick, extraClass = "") {
+  const btn = document.createElement("button");
+  btn.className = `btn ${extraClass}`.trim();
+  btn.type = "button";
+  btn.textContent = label;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+/**
+ * Creates a text input linked to a specific property of the character sheet.
+ * @param {object} sheet - The character data object.
+ * @param {string} property - The property name (e.g., "name", "role").
+ * @param {string} placeHolder - Help text 
+ * @returns {HTMLElement} - The input element
+ */
+function createLinkedInput(sheet, property, placeHolder) {
+  const input = document.createElement("input");
+  input.className = "text-field";
+  input.value = sheet[property] || "";
+  input.placeholder = placeHolder;
+  input.style.marginBottom = "6px";
+
+  input.addEventListener("input", () => {
+    sheet[property] = input.value;
+    scheduleStateSave();
+  });
+
+  return input;
+}
+
+/**
+ * Creates a complete image uploader component with Drag & Drop and Preview.
+ * @param {object} sheet - The character data object. 
+ * @returns {HTMLElement} - It returns two HTML elements, the drop zone and action buttons.
+ */
+function createImageUploader(sheet) {
+  const fragment = document.createDocumentFragment();
+
+  // 1. Create the Drop Zone (The 'X' box)
+  const dropZone = document.createElement("div");
+  dropZone.className = "image-drop";
+
+  const placeHolderText = document.createElement("span");
+  placeHolderText.textContent = "X"
+
+  const previewImg = document.createElement("img");
+  previewImg.alt = "preview"
+
+  // Initial State Check
+  if (sheet.mainImage) {
+    previewImg.src = sheet.mainImage;
+    previewImg.style.display = "block";
+    placeHolderText.style.display = "none";
+  }
+
+  dropZone.appendChild(placeHolderText);
+  dropZone.appendChild(previewImg);
+
+  // 2. Drag & Drop Logic
+  dropZone.addEventListener("dragover", e => {
+    e.preventDefault();
+    dropZone.style.opacity = "0.85";
+  });
+
+  dropZone.addEventListener("dragleave", () => {
+    dropZone.style.opacity = "1";
+  });
+
+  dropZone.addEventListener("drop", async e => {
+    e.preventDefault();
+    dropZone.style.opacity = "1";
+    const file = e.dataTransfer.files?.[0];
+    if (file) await handleImageUpdate(file, sheet, previewImg, placeHolderText);
+  });
+
+  // 3. Action Buttons (Upload / Remove)
+  const actions = document.createElement("div");
+  actions.className = "image-actions no-export";
+
+  // Hidden File Input
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.hidden = true;
+
+  const uploadBtn = createActionButton("Enviar imagem", () => fileInput.click());
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
+    if (file) await handleImageUpdate(file, sheet, previewImg, placeHolderText);
+  });
+
+  const removeBtn = createActionButton("Remover", () => {
+    fileInput.value = "";
+    sheet.mainImage = null;
+    previewImg.removeAttribute("src");
+    previewImg.style.display = "none";
+    placeHolderText.style.display = "block";
+    scheduleStateSave();
+  });
+
+  const imgHint = document.createElement("div");
+  imgHint.className="hint";
+  imgHint.textContent="X = você pode pôr imagem";
+
+  actions.appendChild(uploadBtn);
+  actions.appendChild(removeBtn);
+  actions.appendChild(imgHint);
+  actions.appendChild(fileInput); // Keep it hidden inside
+
+  fragment.appendChild(dropZone);
+  fragment.appendChild(actions);
+
+  return fragment;
+}
+
+/**
+ * Helper to process the image file and update UI/State
+ * @param {object} file - A DataTransfer object that contains the file dragged and dropped. 
+ * @param {object} sheet - The character data object. 
+ * @param {HTMLElement} imgEl - The HTML element that the image will be showed.
+ * @param {HTMLElement} spanEl - The HTML element that holds the placeholder
+ */
+async function handleImageUpdate(file, sheet, imgEl, spanEl) {
+  const dataUrl = await convertFileToDataURL(file);
+  sheet.mainImage = dataUrl;
+  imgEl.src = dataUrl;
+  imgEl.style.display = "block";
+  spanEl.style.display = "none";
+  scheduleStateSave();
+}
+
+/* -----------------------------
    Render Sheet (sem re-render enquanto digita)
 ------------------------------*/
 function renderSheet(sheet){
@@ -508,117 +666,15 @@ function renderSheet(sheet){
   bigImage.className="big-image";
 
   // NOME (at top of image column)
-  const nomeHeader = document.createElement("div");
-  nomeHeader.className="section-header";
-  nomeHeader.style.width="fit-content";
-  nomeHeader.style.marginBottom="4px";
-  nomeHeader.textContent="NOME";
-
-  const nomeInput = document.createElement("input");
-  nomeInput.className="text-field";
-  nomeInput.value = sheet.name || "";
-  nomeInput.placeholder="Digite o nome...";
-  nomeInput.style.marginBottom="6px";
-  nomeInput.addEventListener("input", () => {
-    sheet.name = nomeInput.value;
-    scheduleStateSave();
-  });
-
-  bigImage.appendChild(nomeHeader);
-  bigImage.appendChild(nomeInput);
+  bigImage.appendChild(createSectionHeader("NOME"))
+  bigImage.appendChild(createLinkedInput(sheet, "name", "Digite o nome..."))
 
   // PAPEL (below nome)
-  const papelHeader = document.createElement("div");
-  papelHeader.className="section-header";
-  papelHeader.style.width="fit-content";
-  papelHeader.style.marginBottom="4px";
-  papelHeader.textContent="PAPEL";
+  bigImage.appendChild(createSectionHeader("PAPEL"));
+  bigImage.appendChild(createLinkedInput(sheet, "role", "Digite o papel (ex: Solo, Netrunner)..."));
 
-  const papelInput = document.createElement("input");
-  papelInput.className="text-field";
-  papelInput.value = sheet.role || "";
-  papelInput.placeholder="Digite...";
-  papelInput.style.marginBottom="6px";
-  papelInput.addEventListener("input", () => {
-    sheet.role = papelInput.value;
-    scheduleStateSave();
-  });
-
-  bigImage.appendChild(papelHeader);
-  bigImage.appendChild(papelInput);
-
-  const drop = document.createElement("div");
-  drop.className="image-drop";
-  const dropX = document.createElement("span"); dropX.textContent="X";
-  const dropImg = document.createElement("img");
-  dropImg.alt="preview";
-  drop.appendChild(dropX);
-  drop.appendChild(dropImg);
-
-  if(sheet.mainImage){
-    dropImg.src = sheet.mainImage;
-    dropImg.style.display="block";
-    dropX.style.display="none";
-  }
-
-  drop.addEventListener("dragover", e=>{ e.preventDefault(); drop.style.opacity="0.85"; });
-  drop.addEventListener("dragleave", ()=>{ drop.style.opacity="1"; });
-  drop.addEventListener("drop", async e=>{
-    e.preventDefault(); drop.style.opacity="1";
-    const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    if(!file) return;
-    const dataUrl = await convertFileToDataURL(file);
-    sheet.mainImage = dataUrl;
-    dropImg.src = dataUrl;
-    dropImg.style.display="block";
-    dropX.style.display="none";
-    scheduleStateSave();
-  });
-
-  const imgActions = document.createElement("div");
-  imgActions.className="image-actions no-export";
-
-  const uploadLabel = document.createElement("label");
-  uploadLabel.className="btn";
-  uploadLabel.textContent="Enviar imagem";
-  const uploadInput = document.createElement("input");
-  uploadInput.type="file"; uploadInput.accept="image/*"; uploadInput.hidden=true;
-  uploadLabel.appendChild(uploadInput);
-
-  uploadInput.addEventListener("change", async ()=>{
-    const file = uploadInput.files && uploadInput.files[0];
-    if(!file) return;
-    const dataUrl = await convertFileToDataURL(file);
-    sheet.mainImage = dataUrl;
-    dropImg.src=dataUrl;
-    dropImg.style.display="block";
-    dropX.style.display="none";
-    scheduleStateSave();
-  });
-
-  const clearMain = document.createElement("button");
-  clearMain.className="btn";
-  clearMain.type="button";
-  clearMain.textContent="Remover";
-  clearMain.addEventListener("click", ()=>{
-    uploadInput.value="";
-    sheet.mainImage=null;
-    dropImg.removeAttribute("src");
-    dropImg.style.display="none";
-    dropX.style.display="block";
-    scheduleStateSave();
-  });
-
-  const imgHint = document.createElement("div");
-  imgHint.className="hint";
-  imgHint.textContent="X = você pode pôr imagem";
-
-  imgActions.appendChild(uploadLabel);
-  imgActions.appendChild(clearMain);
-  imgActions.appendChild(imgHint);
-
-  bigImage.appendChild(drop);
-  bigImage.appendChild(imgActions);
+  // Character photo uploader and buttons for controlling it.
+  bigImage.appendChild(createImageUploader(sheet));
 
   // right column
   const right = document.createElement("div");
