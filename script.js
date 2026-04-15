@@ -451,6 +451,39 @@ function getSheetById(id){
   Rendering Helpers
 ------------------------------*/
 /**
+ * Creates the action bar with Export and Delete buttons
+ * @param {HTMLElement} sheetWrapper - The element to be exported/deleted 
+ * @param {object} sheetData - The data object of the character.
+ * @returns {HTMLElement} The container with all action buttons. 
+ */
+function createSheetActions(sheetWrapper, sheetData) {
+  const actionsContainer = document.createElement("div");
+  actionsContainer.className = "sheet-buttons";
+
+  // 1. Button: Export PDF
+  const pdfBtn = createActionButton("Exportar PDF", () => {
+    exportCharacterSheetAsPdf(sheetWrapper, sheetData);
+  });
+
+  // 2. Button: Export JPEG
+  const jpgBtn = createActionButton("Exportar JPEG", () => {
+    exportCharacterSheetAsJpeg(sheetWrapper, sheetData);
+  });
+
+  // 3. Button: Delete (With logic to update the app state)
+  const deleteBtn = createActionButton("Excluir ficha", () => {
+    appState.sheets = appState.sheets.filter(s => s.id !== sheetData.id);
+
+    scheduleStateSave();
+    renderAllSheets();
+  });
+
+  actionsContainer.append(pdfBtn, jpgBtn, deleteBtn);
+
+  return actionsContainer;
+}
+
+/**
  * Creates a stylized section header for the sheet
  * @param {string} title - The text to display (e.g., "STATUS", "EQUIP")
  * @param {string} marginBottom - The marginBottom value to be used in the element. Standard value is 4px
@@ -506,7 +539,7 @@ function createLinkedInput(sheet, property, placeHolder) {
 /**
  * Creates a complete image uploader component with Drag & Drop and Preview.
  * @param {object} sheet - The character data object. 
- * @returns {HTMLElement} - It returns two HTML elements, the drop zone and action buttons.
+ * @returns {DocumentFragment} - It returns two HTML elements, the drop zone and action buttons.
  */
 function createImageUploader(sheet) {
   const fragment = document.createDocumentFragment();
@@ -605,6 +638,125 @@ async function handleImageUpdate(file, sheet, imgEl, spanEl) {
   scheduleStateSave();
 }
 
+/**
+ * Creates the entire Skills section, including the dynamic list and the add button
+ * @param {object} sheet - The character data object
+ * @param {HTMLElement} wrap - The main sheet wrapper (needed for the render function).
+ * @returns {DocumentFragment}
+ */
+function createSkillsSection (sheet, wrap) {
+  const fragment = document.createDocumentFragment();
+
+  // 1. Header
+  const header = createSectionHeader("PERÍCIAS");
+  header.style.marginTop = "12px";
+
+  // 2. Row Container
+  const skillRow = document.createElement("div");
+  skillRow.className = "row";
+
+  // 3. The List (Stack)
+  const skillList = document.createElement("div");
+  skillList.className = "stack";
+  skillList.dataset.list = "skills"
+
+  // 4. Add Button (+)
+  const addBtn = document.createElement("div");
+  addBtn.className = "plus no-export";
+  addBtn.textContent = "+";
+
+  addBtn.addEventListener("click", () => {
+    sheet.skills.push({ nome: "", valor: "" });
+    scheduleStateSave();
+    renderAllSheets();
+  });
+
+  skillRow.appendChild(skillList);
+  skillRow.appendChild(addBtn);
+
+  fragment.appendChild(header);
+  fragment.appendChild(skillRow);
+
+  // 5. Pupulate the list
+  renderSkillsList(sheet, skillList, wrap);
+
+  return fragment;
+}
+
+/**
+ * Creates a small stat block (like VIT or MTC)
+ * @param {object} sheet - The data object. 
+ * @param {string} label - The label text.
+ * @param {string} property - The property in the sheet object 
+ * @returns {HTMLElement}
+ */
+function createMiniStat(sheet, label, property) {
+  const mini = document.createElement("div");
+  mini.className = "mini";
+  mini.innerHTML = `<b>${label}</b>`
+
+  const val = document.createElement("div");
+  val.className = "val";
+  val.contentEditable = "true";
+  val.spellcheck = false;
+  val.textContent = sheet[property] ?? "0";
+
+  val.addEventListener("input", () => {
+    sheet[property] = val.textContent.trim();
+    scheduleStateSave();
+  });
+
+  mini.appendChild(val);
+  return mini;
+}
+
+/**
+ * Generic factory to create a section with a header and a dynamic list (+ button).
+ * @param {object} sheet - The character data object. 
+ * @param {string} title - Header text (e.g., "STATUS"). 
+ * @param {string} listType - The data-list identifier for the CSS/Logic 
+ * @param {object} newItemTemplate - The object structure to add to the array. 
+ * @param {string} arrayName - The property name in the sheet object (e.g., "equipment") 
+ * @param {function} renderCallback - The function that populates the list (e.g., renderEquipList).
+ * @param {HTMLElement} wrap - The seet wrapper
+ * @returns {DocumentFragment}
+ */
+function createDynamicListSection(sheet, title, listType, newItemTemplate, arrayName, renderCallback, wrap) {
+  const fragment = document.createDocumentFragment();
+
+  // 1. Header
+  fragment.appendChild(createSectionHeader(title));
+
+  // 2. Row Container
+  const row = document.createElement("div");
+  row.className = "row";
+
+  // 3. The List (Stack)
+  const listContainer = document.createElement("div");
+  listContainer.className = "stack";
+  listContainer.dataset.list = listType;
+
+  // 4. Add Button (+)
+  const addBtn = document.createElement("div");
+  addBtn.className = "plus no-export";
+  addBtn.textContent = "+";
+
+  addBtn.addEventListener("click", () => {
+    sheet[arrayName].push(newItemTemplate);
+    scheduleStateSave();
+    renderAllSheets();
+  });
+
+  row.appendChild(listContainer);
+  row.appendChild(addBtn);
+  fragment.appendChild(row);
+
+  // 5. Populate
+  renderCallback(sheet, listContainer, wrap);
+
+  return fragment;
+}
+
 /* -----------------------------
    Render Sheet (sem re-render enquanto digita)
 ------------------------------*/
@@ -613,49 +765,23 @@ function renderSheet(sheet){
   if(!sheet.armorSP) sheet.armorSP = { head:0, torso:0, rightArm:0, leftArm:0, rightLeg:0, leftLeg:0 };
   if(!Array.isArray(sheet.damageTrack) || sheet.damageTrack.length!==40) sheet.damageTrack = Array(40).fill(false);
 
-  const wrap = document.createElement("div");
-  wrap.className = "sheet";
-  wrap.dataset.sheetId = sheet.id;
+  const sheetContainer = document.createElement("div");
+  sheetContainer.className = "sheet";
+  sheetContainer.dataset.sheetId = sheet.id;
 
   // sheet header
   const head = document.createElement("div");
   head.className = "sheet-head no-export";
 
-  const left = document.createElement("div");
-  left.className = "sheet-title";
-  left.textContent = "FICHA";
+  const title = document.createElement("div");
+  title.className = "sheet-title";
+  title.textContent = "FICHA";
 
-  const btns = document.createElement("div");
-  btns.className = "sheet-buttons";
+  // Buttons to export/delete
+  const actionButtons = createSheetActions(sheetContainer, sheet);
 
-  const pdfBtn = document.createElement("button");
-  pdfBtn.className="btn";
-  pdfBtn.type="button";
-  pdfBtn.textContent="Exportar PDF";
-  pdfBtn.addEventListener("click", () => exportCharacterSheetAsPdf(wrap, sheet));
-
-  const jpgBtn = document.createElement("button");
-  jpgBtn.className="btn";
-  jpgBtn.type="button";
-  jpgBtn.textContent="Exportar JPEG";
-  jpgBtn.addEventListener("click", () => exportCharacterSheetAsJpeg(wrap, sheet));
-
-  const delBtn = document.createElement("button");
-  delBtn.className="btn";
-  delBtn.type="button";
-  delBtn.textContent="Excluir ficha";
-  delBtn.addEventListener("click", () => {
-    appState.sheets = appState.sheets.filter(s => s.id !== sheet.id);
-    scheduleStateSave();
-    renderAllSheets();
-  });
-
-  btns.appendChild(pdfBtn);
-  btns.appendChild(jpgBtn);
-  btns.appendChild(delBtn);
-
-  head.appendChild(left);
-  head.appendChild(btns);
+  head.appendChild(title);
+  head.appendChild(actionButtons);
 
   // grid
   const grid = document.createElement("div");
@@ -677,174 +803,90 @@ function renderSheet(sheet){
   bigImage.appendChild(createImageUploader(sheet));
 
   // right column
-  const right = document.createElement("div");
+  const rightColumn = document.createElement("div");
 
   // PERICIAS (moved to right column, below nome)
-  const skillHeader = document.createElement("div");
-  skillHeader.className="section-header";
-  skillHeader.style.width="fit-content";
-  skillHeader.style.marginTop="12px";
-  skillHeader.textContent="PERÍCIAS";
-
-  const skillRow = document.createElement("div");
-  skillRow.className="row";
-
-  const skillList = document.createElement("div");
-  skillList.className="stack";
-  skillList.dataset.list="skills";
-
-  const addSkill = document.createElement("div");
-  addSkill.className="plus no-export";
-  addSkill.textContent="+";
-  addSkill.addEventListener("click", ()=>{
-    sheet.skills.push({ nome:"", valor:"" });
-    scheduleStateSave();
-    renderAllSheets(); // estrutural
-  });
-
-  skillRow.appendChild(skillList);
-  skillRow.appendChild(addSkill);
-
-  right.appendChild(skillHeader);
-  right.appendChild(skillRow);
+  rightColumn.appendChild(createSkillsSection(sheet, sheetContainer));
 
   // VIT/MTC (moved to right column, below skills)
-  const miniStats = document.createElement("div");
-  miniStats.className="mini-stats";
+  const miniStatsContainer = document.createElement("div");
+  miniStatsContainer.className="mini-stats";
 
-  const vit = document.createElement("div"); vit.className="mini";
-  vit.innerHTML = `<b>VIT</b>`;
-  const vitVal = document.createElement("div");
-  vitVal.className="val";
-  vitVal.contentEditable="true";
-  vitVal.spellcheck=false;
-  vitVal.textContent = sheet.vitality ?? "0";
-  vitVal.addEventListener("input", ()=>{
-    sheet.vitality = vitVal.textContent.trim();
-    scheduleStateSave();
-  });
-  vit.appendChild(vitVal);
+  miniStatsContainer.appendChild(createMiniStat(sheet, "VIT", "vitality"));
+  miniStatsContainer.appendChild(createMiniStat(sheet, "MTC", "btm"));
 
-  const mtc = document.createElement("div"); mtc.className="mini";
-  mtc.innerHTML = `<b>MTC</b>`;
-  const mtcVal = document.createElement("div");
-  mtcVal.className="val";
-  mtcVal.contentEditable="true";
-  mtcVal.spellcheck=false;
-  mtcVal.textContent = sheet.btm ?? "0";
-  mtcVal.addEventListener("input", ()=>{
-    sheet.btm = mtcVal.textContent.trim();
-    scheduleStateSave();
-  });
-  mtc.appendChild(mtcVal);
+  rightColumn.appendChild(miniStatsContainer);
 
-  miniStats.appendChild(vit);
-  miniStats.appendChild(mtc);
-
-  right.appendChild(miniStats);
-
-  // DAMAGE TRACK (moved to middle column, below vit/mtc)
-  const track = renderTrack(sheet, wrap);
-  right.appendChild(track);
-
-  // ARMOR (moved to middle column)
-  const armor = renderArmor(sheet, wrap);
-  right.appendChild(armor);
+  // Damage Track and Armor
+  rightColumn.appendChild(renderTrack(sheet, sheetContainer));
+  rightColumn.appendChild(renderArmor(sheet, sheetContainer));
 
   // Third column for STATUS + EQUIP
   const thirdColumn = document.createElement("div");
 
   // STATUS
-  const statusHeader = document.createElement("div");
-  statusHeader.className="section-header";
-  statusHeader.textContent="STATUS";
-
-  const statusRow = document.createElement("div");
-  statusRow.className="row";
-
-  const statusList = document.createElement("div");
-  statusList.className="stack";
-  statusList.dataset.list="status";
-
-  const addStatus = document.createElement("div");
-  addStatus.className="plus no-export";
-  addStatus.textContent="+";
-  addStatus.addEventListener("click", ()=>{
-    sheet.stats.push({ name:"", value:"", isFixed:false });
-    scheduleStateSave();
-    renderAllSheets(); // estrutural
-  });
-
-  statusRow.appendChild(statusList);
-  statusRow.appendChild(addStatus);
+  thirdColumn.appendChild(createDynamicListSection(
+    sheet,
+    "STATUS",
+    "status",
+    { name: "", value: "", isFixed: false},
+    "stats",
+    renderStatusList,
+    sheetContainer
+  ));
 
   // EQUIP
-  const equipHeader = document.createElement("div");
-  equipHeader.className="section-header";
-  equipHeader.textContent="EQUIPAMENTO";
-
-  const equipRow = document.createElement("div");
-  equipRow.className="row";
-
-  const equipList = document.createElement("div");
-  equipList.className="stack";
-  equipList.dataset.list="equips";
-
-  const addEquip = document.createElement("div");
-  addEquip.className="plus no-export";
-  addEquip.textContent="+";
-  addEquip.addEventListener("click", ()=>{
-    sheet.equipment.push({ nome:"", descricao:"", image:null });
-    scheduleStateSave();
-    renderAllSheets(); // estrutural
-  });
-
-  equipRow.appendChild(equipList);
-  equipRow.appendChild(addEquip);
-
-  thirdColumn.appendChild(statusHeader);
-  thirdColumn.appendChild(statusRow);
-  thirdColumn.appendChild(equipHeader);
-  thirdColumn.appendChild(equipRow);
+  thirdColumn.appendChild(createDynamicListSection(
+    sheet,
+    "EQUIPAMENTO",
+    "equips",
+    { nome: "", descricao: "", image: null},
+    "equipment",
+    renderEquipList,
+    sheetContainer
+  ));
 
   // mount
   grid.appendChild(bigImage);
-  grid.appendChild(right);
+  grid.appendChild(rightColumn);
   grid.appendChild(thirdColumn);
 
-  wrap.appendChild(head);
-  wrap.appendChild(grid);
-
-  // populate lists
-  renderStatusList(sheet, statusList, wrap);
-  renderEquipList(sheet, equipList, wrap);
-  renderSkillsList(sheet, skillList, wrap);
+  sheetContainer.appendChild(head);
+  sheetContainer.appendChild(grid);
 
   // update badges initially
-  updateBadges(sheet, wrap);
+  updateBadges(sheet, sheetContainer);
 
   // Event delegation for damage clicks inside this sheet:
-  wrap.addEventListener("change", (e) => {
-    const cb = e.target;
-    if(!(cb instanceof HTMLInputElement)) return;
-    if(cb.classList.contains("box") && cb.dataset.absIndex){
-      const abs = Number(cb.dataset.absIndex);
-      const checked = cb.checked;
-      updateWoundTrack(sheet.damageTrack, abs, checked);
+  // 'sheetContainer' watches the changes
+  sheetContainer.addEventListener("change", (event) => {
+    const elementChanged = event.target;
 
-      // Update all checkboxes in THIS track without re-render:
-      const boxes = wrap.querySelectorAll(`input.box[data-sheet="${sheet.id}"]`);
-      boxes.forEach(b => {
-        const i = Number(b.dataset.absIndex);
-        b.checked = !!sheet.damageTrack[i];
+    // 1. Verification: Is the interected element an input or checkbox? 
+    if(!(elementChanged instanceof HTMLInputElement)) return;
+    if(elementChanged.classList.contains("box") && elementChanged.dataset.absIndex){
+
+      const indexInTrack = Number(elementChanged.dataset.absIndex);
+      const isMarked = elementChanged.checked;
+
+      // 2. Update the data inside the object in the sheet
+      updateWoundTrack(sheet.damageTrack, indexInTrack, isMarked);
+
+      // 3. Update all checkboxes in THIS track without re-render:
+      const allDamageBoxes = sheetContainer.querySelectorAll(`input.box[data-sheet="${sheet.id}"]`);
+
+      allDamageBoxes.forEach(checkbox => {
+        const currentIndex = Number(checkbox.dataset.absIndex);
+        // Ensure the UI is exactly what's in the data (state)
+        checkbox.checked = !!sheet.damageTrack[currentIndex];
       });
 
       scheduleStateSave();
-      updateBadges(sheet, wrap);
+      updateBadges(sheet, sheetContainer);
     }
   });
 
-  return wrap;
+  return sheetContainer;
 }
 
 /* -----------------------------
