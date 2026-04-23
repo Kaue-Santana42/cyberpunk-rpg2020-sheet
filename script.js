@@ -1158,93 +1158,120 @@ function createTableCell(type, text, className = "") {
 /* =============================
    STATUS list (no rebuild on typing; rebuild only structural)
 ============================= */
+/**
+ * Renders the status/stats list in the third column.
+ * Handles fixed stats, calculated fields (Run/Leap), and the total weight card
+ * @param {object} sheet - The character data object.
+ * @param {HTMLElement} container - The stack element for status
+ * @param {HTMLElement} sheetEl - The main sheet wrapper.
+ */
 function renderStatusList(sheet, container, sheetEl){
   container.innerHTML = "";
 
-  // ensure auto fields are correct before initial render
-  const total = updateMovementAndTotalStats(sheet);
+  // Ensure state is calculated before rendering
+  const totalWeight = updateMovementAndTotalStats(sheet);
   scheduleStateSave();
 
-  sheet.stats.forEach((item, i)=>{
-    const nLower = (item.name||"").toLowerCase();
-    const isAuto = item.isReadonly || nLower==="run" || nLower==="leap";
-
-    const card = document.createElement("div");
-    card.className="card";
-
-    if(!item.isFixed){
-      const rm = document.createElement("button");
-      rm.className="remove no-export";
-      rm.type="button";
-      rm.textContent="–";
-      rm.addEventListener("click", ()=>{
-        sheet.stats.splice(i,1);
-        scheduleStateSave();
-        renderAllSheets();
-      });
-      card.appendChild(rm);
-    }
-
-    const line = document.createElement("div");
-    line.className="two-col";
-
-    const nome = document.createElement("input");
-    nome.className="text-field grow";
-    nome.value=item.name;
-    nome.placeholder="Nome...";
-    if(item.isFixed){ nome.readOnly=true; nome.style.opacity="0.9"; }
-    nome.addEventListener("input", ()=>{
-      item.name = nome.value;
-      scheduleStateSave();
-      updateBadges(sheet, sheetEl);
-    });
-
-    const val = document.createElement("input");
-    val.className="text-field small";
-    val.value=item.value;
-    val.placeholder="0";
-    if(isAuto){
-      val.readOnly=true;
-      val.classList.add("auto");
-      val.style.opacity="0.95";
-    }
-    val.addEventListener("input", ()=>{
-      item.value = val.value;
-      // updates correr/saltar/total in place
-      updateBadges(sheet, sheetEl);
-      scheduleStateSave();
-    });
-
-    line.appendChild(nome);
-    line.appendChild(val);
-    card.appendChild(line);
+  // Render each individual stat card
+  sheet.stats.forEach((item, index)=>{
+    const card = createStatusCard(item, index, sheet, sheetEl);
     container.appendChild(card);
   });
 
-  // TOTAL card
+  // Render the Final Total Card
   const totalCard = document.createElement("div");
-  totalCard.className="card";
+  totalCard.className = "card";
 
-  const totalLine = document.createElement("div");
-  totalLine.className="two-col";
+  const totalRow = document.createElement("div");
+  totalRow.className = "two-col";
 
-  const totalName = document.createElement("input");
-  totalName.className="text-field grow auto";
-  totalName.readOnly=true;
-  totalName.value="TOTAL";
-  totalName.style.fontWeight="1000";
+  const label = document.createElement("input");
+  label.className = "text-field grow auto";
+  label.readOnly = true;
+  label.value = "TOTAL";
+  label.style.fontWeight = "1000";
 
-  const totalVal = document.createElement("input");
-  totalVal.className="text-field small auto";
-  totalVal.readOnly=true;
-  totalVal.value=formatToTwoDecimals(total);
-  totalVal.style.fontWeight="1000";
-  totalVal.dataset.total="1";
+  const weightDisplay = document.createElement("input");
+  weightDisplay.className = "text-field small auto";
+  weightDisplay.readOnly = true;
+  weightDisplay.value = formatToTwoDecimals(totalWeight);
+  weightDisplay.style.fontWeight = "1000";
+  weightDisplay.dataset.total = "1"; // Used by updateStatusInputs for live updates
 
-  totalLine.appendChild(totalName);
-  totalLine.appendChild(totalVal);
-  totalCard.appendChild(totalLine);
+  totalRow.append(label, weightDisplay);
+  totalCard.appendChild(totalRow);
   container.appendChild(totalCard);
+}
+
+/**
+ * Creates an individual status card with name and values inputs
+ * @param {object} item - The status object {name, value, isFixed, ...} 
+ * @param {number} index - Index in the array for deletion 
+ * @param {object} sheet - Character data
+ * @param {HTMLElement} sheetEl - Sheet container 
+ * @returns {HTMLElement} The card of the status object
+ */
+function createStatusCard(item, index, sheet, sheetEl) {
+  const card = document.createElement("div");
+  card.className = "card";
+
+  const nameLower = (item.name || "").toLowerCase();
+  const isCalculated = item.isReadonly || nameLower === "run" || nameLower === "leap";
+
+  // 1. Remove Button (only for non-fixed stats)
+  if (!item.isFixed) {
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "remove no-export";
+    removeBtn.textContent = "-";
+    removeBtn.onclick = () => {
+      sheet.stats.splice(index, 1);
+      scheduleStateSave();
+      renderAllSheets();
+    };
+    card.appendChild(removeBtn);
+  }
+
+  const row = document.createElement("div");
+  row.className = "two-col";
+
+  // 2. Name Input
+  const nameInp = document.createElement("input");
+  nameInp.className = "text-field grow";
+  nameInp.value = item.name;
+  nameInp.placeholder = "Nome..."
+
+  if (item.isFixed) {
+    nameInp.readOnly = true;
+    nameInp.style.opacity = "0.9";
+  }
+
+  nameInp.oninput = () => {
+    item.name = nameInp.value;
+    scheduleStateSave();
+    updateBadges(sheet, sheetEl); // Sync changes live
+  };
+
+  // 3. Value Input
+  const valInp = document.createElement("input");
+  valInp.className = "text-field small";
+  valInp.value = item.value;
+  valInp.placeholder = "0";
+
+  if (isCalculated) {
+    valInp.readOnly = true;
+    valInp.classList.add("auto");
+    valInp.style.opacity = "0.95";
+  }
+
+  valInp.oninput = () => {
+    item.value = valInp.value;
+    scheduleStateSave();
+    updateBadges(sheet, sheetEl);
+  };
+
+  row.append(nameInp, valInp);
+  card.appendChild(row);
+  return card;
 }
 
 /* =============================
