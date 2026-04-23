@@ -1072,72 +1072,87 @@ function createStunRow(start, end) {
 /* =============================
    Armor renderer (updates badges live)
 ============================= */
+/**
+ * Renders the armor Stopping Power (SP) table.
+ * Links each body part to its specific protection value in the state.
+ * @param {object} sheet - The character data object.
+ * @param {HTMLElement} sheetEl - The sheet container for badge updates. 
+ * @returns {HTMLElement} The armor table container.
+ */
 function renderArmor(sheet, sheetEl){
-  const wrap = document.createElement("div");
-  wrap.className="armor";
+  const armorWrap = document.createElement("div");
+  armorWrap.className = "armor";
 
   const table = document.createElement("table");
 
-  const tr1 = document.createElement("tr");
-  const thLoc = document.createElement("th");
-  thLoc.className="loc";
-  thLoc.textContent="Localização";
-  tr1.appendChild(thLoc);
-
-  const headers = [
-    { key:"cabeca", label:"Cabeça" },
-    { key:"torso",  label:"Torso" },
-    { key:"bracoD", label:"Braço D." },
-    { key:"bracoE", label:"Braço E" },
-    { key:"pernaD", label:"Perna D." },
-    { key:"pernaE", label:"Perna E." }
+  // 1. Define the body parts and their hit dice ranges
+  const bodyParts = [
+    { key:"head", label:"Cabeça", range: "1" },
+    { key:"torso",  label:"Torso", range: "2-4" },
+    { key:"rightArm", label:"Braço D.", range: "5" },
+    { key:"RightArm", label:"Braço E", range: "6" },
+    { key:"RightLeg", label:"Perna D.", range: "7-8" },
+    { key:"LeftLeg", label:"Perna E.", range: "9-0" }
   ];
-  headers.forEach(h=>{
-    const th=document.createElement("th");
-    th.textContent=h.label;
-    tr1.appendChild(th);
+
+  // 2. Crate Header Row (Labels)
+  const headerRow = document.createElement("tr");
+  headerRow.appendChild(createTableCell("th", "Localização", "loc"));
+
+  bodyParts.forEach(part => {
+    headerRow.appendChild(createTableCell("th", part.label));
   });
-  table.appendChild(tr1);
+  table.appendChild(headerRow);
 
-  const tr2 = document.createElement("tr");
-  const thBlank = document.createElement("th");
-  thBlank.className="sub";
-  thBlank.textContent="";
-  tr2.appendChild(thBlank);
-  ["1","2-4","5","6","7-8","9-0"].forEach(s=>{
-    const th=document.createElement("th");
-    th.className="sub";
-    th.textContent=s;
-    tr2.appendChild(th);
+  // 3. Create Dice Range Row
+  const diceRow = document.createElement("tr");
+  diceRow.appendChild(createTableCell("th", "", "sub"))
+
+  bodyParts.forEach(part => {
+    diceRow.appendChild(createTableCell("th", part.range, "sub"));
   });
-  table.appendChild(tr2);
+  table.appendChild(diceRow);
 
-  const tr3 = document.createElement("tr");
-  const tdPB = document.createElement("td");
-  tdPB.className="pb";
-  tdPB.textContent="Blindagem  PB";
-  tr3.appendChild(tdPB);
+  // 4. Create Input Row (Values)
+  const inputRow = document.createElement("tr");
+  inputRow.appendChild(createTableCell("td", "Blindagem PB", "pb"));
 
-  headers.forEach(h=>{
-    const td=document.createElement("td");
-    const inp=document.createElement("input");
-    inp.type="number";
-    inp.step="1";
-    inp.value = String(sheet.armorSP?.[h.key] ?? 0);
+  bodyParts.forEach(part => {
+    const cell = document.createElement("td");
+    const input = document.createElement("input");
 
-    inp.addEventListener("input", ()=>{
-      sheet.armorSP[h.key] = parseToSafeNumber(inp.value);
+    input.type="number";
+    input.step = "1";
+    input.value = String(sheet.armorSP?.[part.key] ?? 0);
+
+    input.addEventListener("input", () => {
+      // Updates state and triggers UI sync
+      sheet.armorSP[part.key] = parseToSafeNumber(input.value);
       scheduleStateSave();
       updateBadges(sheet, sheetEl);
     });
 
-    td.appendChild(inp);
-    tr3.appendChild(td);
+    cell.appendChild(input);
+    inputRow.appendChild(cell);
   });
 
-  table.appendChild(tr3);
-  wrap.appendChild(table);
-  return wrap;
+  table.appendChild(inputRow);
+  armorWrap.appendChild(table);
+  return armorWrap;
+}
+
+/**
+ * Helper to create table cells (th/td) with less boilerplate
+ * @param {string} type - Type of tag of the table (th/td)
+ * @param {string} text - Text that will be written in the cell
+ * @param {string} className - Class of the tag if it has.
+ * @returns {HTMLElement} - The cell of the table
+ */
+function createTableCell(type, text, className = "") {
+  const cell = document.createElement(type);
+  cell.textContent = text;
+  if (className) cell.className = className;
+  return cell;
 }
 
 /* =============================
