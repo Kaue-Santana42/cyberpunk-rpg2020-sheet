@@ -892,118 +892,181 @@ function renderSheet(sheet){
 /* -----------------------------
    Badges
 ------------------------------*/
-function updateBadges(sheet, sheetEl){
-  const total = updateMovementAndTotalStats(sheet); // updates correr/saltar in state too
-  // reflect correr/saltar and total in DOM if present
-  const statusBox = sheetEl.querySelector('[data-list="status"]');
-  if(statusBox){
-    // update the existing correr/saltar inputs without full rebuild
-    for(const card of statusBox.querySelectorAll(".card")){
-      const name = card.querySelector('.text-field.grow')?.value?.toLowerCase?.() || "";
-      const valInput = card.querySelector('.text-field.small');
-      if(!valInput) continue;
-      if(name === "run"){
-        valInput.value = sheet.stats.find(s => s.name.toLowerCase()==="run")?.value ?? "";
-      }
-      if(name === "leap"){
-        valInput.value = sheet.stats.find(s => s.name.toLowerCase()==="leap")?.value ?? "";
-      }
+/**
+ * Helper function to update the text content of a specific badge.
+ * @param {HTMLElement} parent - The container to search within.
+ * @param {string} badgeType - The value of the data-badge attribute. 
+ * @param {string} text - The new text to display.
+ */
+function updateBadgeText(parent, badgeType, text) {
+  const badge = parent.querySelector(`[data-badge="${badgeType}"]`);
+  if (badge) badge.textContent = text;
+}
+
+/**
+ * Scans the status list and updates specific calculated fields (Run/Leap)
+ * to reflect changes in movement without a full re-render.
+ * @param {object} sheet - The character data object.
+ * @param {HTMLElement} sheetEl - The sheet DOM element 
+ */
+function updateStatusInputs(sheet, sheetEl) {
+  const statusContainer = sheetEl.querySelector('[data-list="status"]');
+  if (!statusContainer) return;
+
+  // We iterate through each status card to find the ones that need auto-calculation
+  const statusCards = statusContainer.querySelectorAll(".card");
+
+  statusCards.forEach(card => {
+    const nameInput = card.querySelector('.text-field.grow');
+    const valueInput = card.querySelector('.text-field.small');
+
+    if (!nameInput || !valueInput) return;
+
+    const statusName = nameInput.value.toLowerCase().trim();
+
+    // Logic for "Run"
+    if (statusName === "run") {
+      const runData = sheet.stats.find(s => s.name.toLowerCase() === "run");
+      valueInput.value = runData?.value ?? "";
     }
-    const totalVal = statusBox.querySelector('input[data-total="1"]');
-    if(totalVal) totalVal.value = formatToTwoDecimals(total);
+
+    // Logic for "Leap"
+    if (statusName === "leap") {
+      const leapData = sheet.stats.find(s => s.name.toLowerCase() === "leap");
+      valueInput.value = leapData?.value ?? "";
+    }
+  });
+
+  // Update the total sum box of the values
+  const totalValues = statusContainer.querySelector('input[data-total="1"]');
+  if (totalValues) {
+    totalValues.value = formatToTwoDecimals(updateMovementAndTotalStats(sheet));
   }
 
-  const dmg = getTotalDamageCount(sheet.damageTrack);
-  const arm = armorSum(sheet.armorSP);
+}
 
-  const bTotal = sheetEl.querySelector('[data-badge="total"]');
-  const bDmg = sheetEl.querySelector('[data-badge="dmg"]');
-  const bArm = sheetEl.querySelector('[data-badge="arm"]');
+/**
+ * Updates all visual indicators (badges) and calculated fields on the sheet.
+ * Acts as the primary synchronization point between State and UI for real-time stats.
+ * @param {object} sheet - The character data object. 
+ * @param {HTMLElement} sheetElement - The sheet DOM element.
+ */
+function updateBadges(sheet, sheetElement) {
+  // 1. Calculate current totals from the state
+  const totalStats = updateMovementAndTotalStats(sheet);
+  const damageCount = getTotalDamageCount(sheet.damageTrack);
+  const armorProtection = armorSum(sheet.armorSP);
 
-  if(bTotal) bTotal.textContent = `TOTAL: ${formatToTwoDecimals(total)}`;
-  if(bDmg) bDmg.textContent = `DANO: ${dmg}/40`;
-  if(bArm) bArm.textContent = `PB: ${arm}`;
+  // 2. Synchronize specific inputs in the Status column
+  updateStatusInputs(sheet, sheetElement);
+  
+  // 3. Update the summary badges
+  updateBadgeText(sheetElement, "total", `TOTAL: ${formatToTwoDecimals(totalStats)}`);
+  updateBadgeText(sheetElement, "dmg", `DANO: ${damageCount}/40`);
+  updateBadgeText(sheetElement, "arm", `PB: ${armorProtection}`);
 }
 
 /* =============================
    Track renderer (data attrs p/ delegation)
 ============================= */
-function renderTrack(sheet){
-  const track = document.createElement("div");
-  track.className="track";
 
+/**
+ * Renders the health track (Damage Track) for the character sheet
+ * Generates 40 checkboxes divided into severity levels and stun save indicators.
+ * @param {object} sheet - The character data object.
+ * @returns {HTMLElement} The complete track container.
+ */
+function renderTrack(sheet){
+  const trackContainer = document.createElement("div");
+  trackContainer.className = "track";
+
+  // Damage Level labels as per Cyberpunk 2020 rules
   const groupsTop = ["LEVE","GRAVE","CRÍTICO","MORTAL-0","MORTAL-1"];
   const groupsBottom = ["MORTAL-2","MORTAL-3","MORTAL-4","MORTAL-5","MORTAL-6"];
 
-  const grid1 = document.createElement("div");
-  grid1.className="track-grid";
+  const firstGrid = document.createElement("div");
+  firstGrid.className = "track-grid";
 
-  let gIndex = 0;
+  let globalGroupCounter = 0;
 
+  /**
+   * Internal factory to create a damage group (4 boxes per level)
+   * @param {string} title - Level name (e.g., "GRAVE")
+   * @param {number} groupIndex - Current group sequence for index calculation.
+   */
   function makeGroup(title, groupIndex){
-    const lvl = document.createElement("div");
-    lvl.className="lvl";
+    const levelElement = document.createElement("div");
+    levelElement.className="lvl";
 
-    const t = document.createElement("div");
-    t.className="lvl-title";
-    t.textContent=title;
+    const titleElement = document.createElement("div");
+    titleElement.className = "lvl-title";
+    titleElement.textContent = title;
 
-    const boxes = document.createElement("div");
-    boxes.className="boxes";
+    const boxesContainer = document.createElement("div");
+    boxesContainer.className="boxes";
 
-    for(let i=0;i<4;i++){
-      const abs = groupIndex*4+i;
-      const cb = document.createElement("input");
-      cb.type="checkbox";
-      cb.className="box";
-      cb.checked = !!sheet.damageTrack[abs];
-      cb.dataset.absIndex = String(abs);
-      cb.dataset.sheet = sheet.id; // helps find within sheet
-      boxes.appendChild(cb);
+    for(let i = 0; i < 4; i++){
+      const absoluteIndex = groupIndex * 4 + i;
+      const checkbox = document.createElement("input");
+
+      checkbox.type="checkbox";
+      checkbox.className="box";
+
+      // Double bang (!!) ensures a boolean value from the array
+      checkbox.checked = !!sheet.damageTrack[absoluteIndex];
+
+      // Critical for Event Delegation
+      checkbox.dataset.absIndex = String(absoluteIndex);
+      checkbox.dataset.sheet = sheet.id; // helps find within sheet
+
+      boxesContainer.appendChild(checkbox);
     }
 
-    lvl.appendChild(t);
-    lvl.appendChild(boxes);
-    return lvl;
+    levelElement.appendChild(titleElement);
+    levelElement.appendChild(boxesContainer);
+    return levelElement;
   }
 
-  for(let i=0;i<groupsTop.length;i++){
-    grid1.appendChild(makeGroup(groupsTop[i], gIndex));
-    gIndex++;
+  // Build Top Grid
+  groupsTop.forEach(title => {
+    firstGrid.appendChild(makeGroup(title, globalGroupCounter));
+    globalGroupCounter++;
+  });
+
+  // Create Stun rows (Helper function could be used here for DRY)
+  const stunRow1 = createStunRow(0, 5);
+
+  const secondGrid = document.createElement("div");
+  secondGrid.className="track-grid second";
+
+  groupsBottom.forEach(title => {
+    secondGrid.appendChild(makeGroup(title, globalGroupCounter));
+    globalGroupCounter++;
+  });
+
+  const stunRow2 = createStunRow(5, 10);
+
+  trackContainer.append(firstGrid, stunRow1, secondGrid, stunRow2);
+  return trackContainer;
+}
+
+/**
+ * Helper to create stun save indicator rows
+ * @param {number} start - The first number of the row
+ * @param {number} end - The last number in the row minus one
+ * @returns {HTMLElement} - The row with stun levels
+ */
+function createStunRow(start, end) {
+  const row = document.createElement("div");
+  row.className = "atord-row";
+
+  for (let i = start; i < end; i++) {
+    const stunIndicator = document.createElement("div");
+    stunIndicator.className = "atord";
+    stunIndicator.textContent = `atord-${i}`;
+    row.appendChild(stunIndicator);
   }
-
-  const atord1 = document.createElement("div");
-  atord1.className="atord-row";
-  for(let i=0;i<5;i++){
-    const a=document.createElement("div");
-    a.className="atord";
-    a.textContent=`Atord-${i}`;
-    atord1.appendChild(a);
-  }
-
-  const grid2 = document.createElement("div");
-  grid2.className="track-grid second";
-
-  for(let i=0;i<groupsBottom.length;i++){
-    grid2.appendChild(makeGroup(groupsBottom[i], gIndex));
-    gIndex++;
-  }
-
-  const atord2 = document.createElement("div");
-  atord2.className="atord-row";
-  for(let i=5;i<10;i++){
-    const a=document.createElement("div");
-    a.className="atord";
-    a.textContent=`Atord-${i}`;
-    atord2.appendChild(a);
-  }
-
-  track.appendChild(grid1);
-  track.appendChild(atord1);
-  track.appendChild(grid2);
-  track.appendChild(atord2);
-
-  return track;
+  return row;
 }
 
 /* =============================
