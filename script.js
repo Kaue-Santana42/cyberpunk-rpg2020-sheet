@@ -1277,49 +1277,67 @@ function createStatusCard(item, index, sheet, sheetEl) {
 /* =============================
    Skills
 ============================= */
-function renderSkillsList(sheet, container, sheetEl){
+/**
+ * Renders the full list of skills in the second columns
+ * @param {object} sheet - The character data object 
+ * @param {HTMLElement} container - The .stack element for skills 
+ */
+function renderSkillsList(sheet, container){
   container.innerHTML = "";
-  sheet.skills.forEach((sk, i)=>{
-    const card=document.createElement("div");
-    card.className="card";
 
-    const rm=document.createElement("button");
-    rm.className="remove no-export";
-    rm.type="button";
-    rm.textContent="–";
-    rm.addEventListener("click", ()=>{
-      sheet.skills.splice(i,1);
-      scheduleStateSave();
-      renderAllSheets();
-    });
-
-    const line=document.createElement("div");
-    line.className="two-col";
-
-    const nome=document.createElement("input");
-    nome.className="text-field grow";
-    nome.value=sk.nome ?? "";
-    nome.placeholder="Perícia...";
-    nome.addEventListener("input", ()=>{
-      sk.nome = nome.value;
-      scheduleStateSave();
-    });
-
-    const val=document.createElement("input");
-    val.className="text-field small";
-    val.value=sk.valor ?? "";
-    val.placeholder="0";
-    val.addEventListener("input", ()=>{
-      sk.valor = val.value;
-      scheduleStateSave();
-    });
-
-    card.appendChild(rm);
-    line.appendChild(nome);
-    line.appendChild(val);
-    card.appendChild(line);
-    container.appendChild(card);
+  sheet.skills.forEach((skill, index)=>{
+    const skillCard = createSkillCard(skill, index, sheet);
+    container.appendChild(skillCard);
   });
+}
+
+/**
+ * Factory function to create a single Skill row.
+ * @param {object} skill - The skill object {name, value}. 
+ * @param {number} index - Position in the array for deletion logic
+ * @param {object} sheet - The character data object
+ * @returns {HTMLElement} - The card with all elements
+ */
+function createSkillCard(skill, index, sheet) {
+  const card = document.createElement('div');
+  card.className = "card";
+
+  // 1. Remove Button
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "remove no-export";
+  removeBtn.textContent = "-";
+  removeBtn.onclick = () => {
+    sheet.skills.splice(index, 1);
+    scheduleStateSave();
+    renderAllSheets(); // Structural change requires full re-render
+  };
+
+  const row = document.createElement("div");
+  row.className = "two-col";
+
+  // 2. Skill Name Input
+  const nameInput = document.createElement("input");
+  nameInput.className = "text-field grow";
+  nameInput.value = skill.name ?? "";
+  nameInput.placeholder = "Perícia...";
+  nameInput.oninput = () => {
+    skill.name = nameInput.value;
+    scheduleStateSave();
+  };
+
+  // 3. Skill Value Input
+  const valueInput = document.createElement("input");
+  valueInput.className = "text-field small";
+  valueInput.value = skill.value ?? "";
+  valueInput.placeholder = "0";
+  valueInput.oninput = () => {
+    skill.value = valueInput.value;
+    scheduleStateSave();
+  };
+
+  row.append(nameInput, valueInput);
+  card.append(removeBtn, row);
+  return card;
 }
 
 /* =============================
@@ -1507,6 +1525,49 @@ function renderEquipList(sheet, container, sheetEl){
 
     container.appendChild(card);
   });
+}
+
+function createEquipCard(equipment, index, sheet) {
+  const card = document.createElement("div");
+  card.className = "card tall";
+
+  // Default state: collapsed
+  equipment.collapsed = equipment.collapsed ?? true;
+
+  // 1. Remove Button
+  const removeBtn = createActionButton("-", () => {
+    sheet.equipment.splice(index, 1);
+    scheduleStateSave();
+    renderAllSheets();
+  }, "remove no-export");
+  card.appendChild(removeBtn);
+
+  // 2. Header Section (Toggle + Name + Preview)
+  const header = document.createElement("div");
+  header.className = "card-header no-export";
+
+  const toggle = document.createElement("div");
+  toggle.className = "card-toggle";
+  toggle.textContent = equipment.collapsed ? "+" : "-";
+
+  const nameInput = document.createElement("input");
+  nameInput.className = "text-field";
+  nameInput.value = equipment.name ?? "";
+  nameInput.placeholder = "Nome do equipamento...";
+  nameInput.style.flex = "1";
+  nameInput.style.marginBottom = "0";
+  nameInput.oninput = () => { equipment.name = nameInput.value; scheduleStateSave(); };
+  nameInput.onclick = (e) => e.stopPropagation(); // Prevents toggling when clicking input
+
+  const descPreview = document.createElement("div");
+  descPreview.className = "desc-preview"; // Use CSS for the ellipsis styles
+
+  const updatePreview = () => {
+    descPreview.textContent = (equipment.collapsed && equipment.description) ? equipment.description : "";
+    descPreview.style.display = (equipment.collapsed && equipment.description) ? "block" : "none";
+  };
+
+  header.append(toggle, nameInput, descPreview);
 }
 
 /* =============================
