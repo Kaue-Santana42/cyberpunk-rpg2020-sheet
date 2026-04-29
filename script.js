@@ -1343,208 +1343,50 @@ function createSkillCard(skill, index, sheet) {
 /* =============================
    Equip
 ============================= */
-function renderEquipList(sheet, container, sheetEl){
+/**
+ * Renders the equipment list with expandable cards and image support
+ * @param {object} sheet - Character data.
+ * @param {HTMLElement} container - Target .stack element. 
+ */
+function renderEquipList(sheet, container){
   container.innerHTML="";
-  sheet.equipment.forEach((eq, i)=>{
-    const card=document.createElement("div");
-    card.className="card tall";
-    card.dataset.equipIndex=i;
-    
-    // Initialize collapsed state (default: collapsed)
-    eq.collapsed = eq.collapsed !== false ? true : false;
-
-    const rm=document.createElement("button");
-    rm.className="remove no-export";
-    rm.type="button";
-    rm.textContent="–";
-    rm.addEventListener("click", ()=>{
-      sheet.equipment.splice(i,1);
-      scheduleStateSave();
-      renderAllSheets();
-    });
-    card.appendChild(rm);
-
-    // Card Header (nome com toggle)
-    const header=document.createElement("div");
-    header.className="card-header no-export";
-    header.style.marginBottom="8px";
-    
-    const toggle=document.createElement("div");
-    toggle.className="card-toggle";
-    toggle.textContent = eq.collapsed ? "+" : "−";
-    
-    const nomeName=document.createElement("input");
-    nomeName.className="text-field";
-    nomeName.value=eq.nome ?? "";
-    nomeName.placeholder="Nome do equipamento...";
-    nomeName.style.flex="1";
-    nomeName.style.marginBottom="0";
-    nomeName.addEventListener("input", ()=>{
-      eq.nome = nomeName.value;
-      scheduleStateSave();
-    });
-    nomeName.addEventListener("click", (e)=>{
-      e.stopPropagation();
-    });
-    
-    const descPreview=document.createElement("div");
-    descPreview.style.flex="1";
-    descPreview.style.fontSize="14px";
-    descPreview.style.color="var(--muted)";
-    descPreview.style.overflow="hidden";
-    descPreview.style.textOverflow="ellipsis";
-    descPreview.style.whiteSpace="nowrap";
-    descPreview.style.marginLeft="8px";
-    
-    const updateDescPreview = () => {
-      if(eq.collapsed && eq.descricao){
-        descPreview.textContent = eq.descricao;
-        descPreview.style.display = "block";
-      } else {
-        descPreview.style.display = "none";
-      }
-    };
-    
-    header.appendChild(toggle);
-    header.appendChild(nomeName);
-    header.appendChild(descPreview);
-    
-    header.addEventListener("click", ()=>{
-      eq.collapsed = !eq.collapsed;
-      toggle.textContent = eq.collapsed ? "+" : "−";
-      content.classList.toggle("hidden");
-      updateDescPreview();
-      scheduleStateSave();
-    });
-
-    // Card Content (expandível)
-    const content=document.createElement("div");
-    content.className="card-content no-export";
-    if(eq.collapsed) content.classList.add("hidden");
-
-    const xBox=document.createElement("div");
-    xBox.className="x-box";
-    const x=document.createElement("div");
-    x.className="x";
-    x.textContent="X";
-    const img=document.createElement("img");
-    img.alt="equip preview";
-    xBox.appendChild(x);
-    xBox.appendChild(img);
-
-    if(eq.image){
-      img.src=eq.image;
-      img.style.display="block";
-      x.style.display="none";
-      
-      // Ajusta altura ao carregar imagem existente
-      img.onload = () => {
-        const aspectRatio = img.naturalWidth / img.naturalHeight;
-        const width = xBox.offsetWidth;
-        const calculatedHeight = width / aspectRatio;
-        xBox.style.height = Math.min(calculatedHeight, 300) + "px";
-      };
-    }
-
-    const actions=document.createElement("div");
-    actions.className="no-export";
-    actions.style.display="flex";
-    actions.style.gap="8px";
-    actions.style.marginBottom="8px";
-    actions.style.flexWrap="wrap";
-
-    const uploadLabel=document.createElement("label");
-    uploadLabel.className="btn";
-    uploadLabel.style.padding="6px 8px";
-    uploadLabel.style.fontSize="12px";
-    uploadLabel.textContent="Imagem";
-    const fileInput=document.createElement("input");
-    fileInput.type="file";
-    fileInput.accept="image/*";
-    fileInput.hidden=true;
-    uploadLabel.appendChild(fileInput);
-
-    fileInput.addEventListener("change", async ()=>{
-      const file = fileInput.files && fileInput.files[0];
-      if(!file) return;
-      const dataUrl = await convertFileToDataURL(file);
-      eq.image = dataUrl;
-      img.src=dataUrl;
-      img.style.display="block";
-      x.style.display="none";
-      
-      // Ajusta altura do container ao carregar imagem
-      img.onload = () => {
-        const aspectRatio = img.naturalWidth / img.naturalHeight;
-        const width = xBox.offsetWidth;
-        const calculatedHeight = width / aspectRatio;
-        xBox.style.height = Math.min(calculatedHeight, 300) + "px";
-      };
-      
-      scheduleStateSave();
-    });
-
-    const clearBtn=document.createElement("button");
-    clearBtn.className="btn";
-    clearBtn.type="button";
-    clearBtn.style.padding="6px 8px";
-    clearBtn.style.fontSize="12px";
-    clearBtn.textContent="Limpar";
-    clearBtn.addEventListener("click", ()=>{
-      fileInput.value="";
-      eq.image=null;
-      img.removeAttribute("src");
-      img.style.display="none";
-      x.style.display="block";
-      xBox.style.height="90px";
-      scheduleStateSave();
-    });
-
-    actions.appendChild(uploadLabel);
-    actions.appendChild(clearBtn);
-
-    const desc=document.createElement("textarea");
-    desc.className="text-field";
-    desc.value=eq.descricao ?? "";
-    desc.placeholder="Descrição...";
-    desc.addEventListener("input", ()=>{
-      eq.descricao = desc.value;
-      updateDescPreview();
-      scheduleStateSave();
-    });
-
-    content.appendChild(xBox);
-    content.appendChild(actions);
-    content.appendChild(desc);
-
-    card.appendChild(header);
-    card.appendChild(content);
-    
-    // Atualiza preview inicial
-    updateDescPreview();
-
-    container.appendChild(card);
+  sheet.equipment.forEach((equipment, index)=>{
+    const equipCard = createEquipCard(equipment, index, sheet);
+    container.appendChild(equipCard);
   });
 }
 
+/**
+ * Factory to create an equipment card with expand/collapse logic and image upload
+ * @param {object} equipment - The equipment data object.
+ * @param {number} index - The current equipment index 
+ * @param {object} sheet - The character data object
+ * @returns {HTMLElement} - The card containing the equipment image and its information.
+ */
 function createEquipCard(equipment, index, sheet) {
   const card = document.createElement("div");
   card.className = "card tall";
+  card.dataset.equipIndex = index;
 
   // Default state: collapsed
   equipment.collapsed = equipment.collapsed ?? true;
 
   // 1. Remove Button
-  const removeBtn = createActionButton("-", () => {
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "remove no-export";
+  removeBtn.type = "button";
+  removeBtn.textContent = "–";
+  removeBtn.onclick = () => {
     sheet.equipment.splice(index, 1);
     scheduleStateSave();
     renderAllSheets();
-  }, "remove no-export");
+  };
   card.appendChild(removeBtn);
 
   // 2. Header Section (Toggle + Name + Preview)
   const header = document.createElement("div");
   header.className = "card-header no-export";
+  header.style.marginBottom = "8px";
 
   const toggle = document.createElement("div");
   toggle.className = "card-toggle";
@@ -1560,14 +1402,180 @@ function createEquipCard(equipment, index, sheet) {
   nameInput.onclick = (e) => e.stopPropagation(); // Prevents toggling when clicking input
 
   const descPreview = document.createElement("div");
-  descPreview.className = "desc-preview"; // Use CSS for the ellipsis styles
+  descPreview.style.flex = "1";
+  descPreview.style.fontSize = "14px";
+  descPreview.style.color = "var(--muted)";
+  descPreview.style.overflow = "hidden";
+  descPreview.style.textOverflow = "ellipsis";
+  descPreview.style.whiteSpace = "nowrap";
+  descPreview.style.marginLeft = "8px";
 
   const updatePreview = () => {
-    descPreview.textContent = (equipment.collapsed && equipment.description) ? equipment.description : "";
-    descPreview.style.display = (equipment.collapsed && equipment.description) ? "block" : "none";
+    if (equipment.collapsed && equipment.description){
+        descPreview.textContent = equipment.description;
+        descPreview.style.display = "block";
+      } else {
+        descPreview.style.display = "none";
+      }
   };
 
   header.append(toggle, nameInput, descPreview);
+
+  // 3. Content Section (The expandable part)
+  const content = document.createElement("div");
+  content.className = `card-content no-export ${equipment.collapsed ? "hidden" : ""}`;
+
+  // Image Container Logic
+  const { xBox, img, xPlaceholder } = createImageContainer(equipment);
+
+  // Actions (Upload/Clear)
+  const actions = createEquipActions(equipment, img, xPlaceholder, xBox);
+
+  // Description
+  const descArea = document.createElement("textarea");
+  descArea.className = "text-field";
+  descArea.value = equipment.description ?? "";
+  descArea.placeholder = "Descrição...";
+  descArea.oninput = () => {
+    equipment.description = descArea.value;
+    updatePreview();
+    scheduleStateSave();
+  };
+
+  // Toggle Click Event
+  header.onclick = () => {
+    equipment.collapsed = !equipment.collapsed;
+    toggle.textContent = equipment.collapsed ? "+" : "-";
+    content.classList.toggle("hidden");
+    updatePreview();
+    scheduleStateSave();
+  };
+
+  content.append(xBox, actions, descArea);
+  card.append(header, content);
+  updatePreview(); // Initial sync
+
+  return card;
+}
+
+/**
+ * Handles the logic for the equipment image display and aspect ration
+ * @param {object} equipment - The equipment data object.
+ * @returns {object} - Object containing HTML elements that hold the img {container, image, placeholder}
+ */
+function createImageContainer(equipment) {
+  const xBox = document.createElement("div");
+  xBox.className = "x-box";
+
+  const xPlaceholder = document.createElement("div");
+  xPlaceholder.className = "x";
+  xPlaceholder.textContent = "X";
+
+  const img = document.createElement("img");
+  img.alt = "equip preview";
+
+  if (equipment.image) {
+    img.src = equipment.image;
+    img.style.display = "block";
+    xPlaceholder.style.display = "none";
+    // Adjust height based on aspect ration
+    img.onload = () => adjustImageBoxHeight(img, xBox);
+  }
+
+  xBox.append(xPlaceholder, img);
+  return { xBox, img, xPlaceholder };
+}
+
+/**
+ * Calculates and sets the height of the image box to prevent layout shifts.
+ * @param {HTMLImageElement} img - The image saved in the character sheet
+ * @param {HTMLElement} container - The container which will hold the image
+ */
+function adjustImageBoxHeight(img, container) {
+  const aspectRation = img.naturalWidth / img.naturalHeight;
+  const width = container.offsetWidth;
+  const height = Math.min(width / aspectRation, 300);
+  container.style.height = height + "px";
+}
+
+/**
+ * Creates the action buttons for an equipment card (Image upload and Clear)
+ * @param {object} equipment - The equipment data object.
+ * @param {HTMLImageElement} imgElement - The <img> tag to be updated.
+ * @param {HTMLElement} placeHolder - The "X" placeholder div
+ * @param {HTMLElement} xBox - The container for the image
+ * @returns {HTMLElement} The actions container.
+ */
+function createEquipActions(equipment, imgElement, placeHolder, xBox) {
+  const actionRow = document.createElement("div");
+  actionRow.className = "no-export";
+  actionRow.style.display = "flex";
+  actionRow.style.gap = "8px";
+  actionRow.style.marginBottom = "8px";
+  actionRow.style.flexWrap = "wrap";
+  
+  // 1. Upload Button (Label + Hidden Input)
+  const uploadLabel = document.createElement("label");
+  uploadLabel.className = "btn";
+  uploadLabel.textContent = "Imagem";
+  uploadLabel.style.fontSize = "12px";
+
+  const fileInput = document.createElement ("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.hidden = true;
+
+  uploadLabel.appendChild(fileInput);
+
+  // Event: Handle File Selection
+  fileInput.onchange = async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    try {
+      // Convert file to Base64 string
+      const dataUrl = await convertFileToDataURL(file);
+
+      // Update State
+      equipment.image = dataUrl;
+
+      // Update UI
+      imgElement.src = dataUrl;
+      imgElement.style.display = "block";
+      placeHolder.style.display = "none";
+
+      // Recalculate container height once image loads
+      imgElement.onload = () => adjustImageBoxHeight(imgElement, xBox);
+
+      scheduleStateSave();
+    } catch (error) {
+      console.error("Error uploading image: ", error);
+      alert("Erro ao carregar a imagem.");
+    }
+  };
+
+  // 2. Clear Button
+  const clearBtn = document.createElement("Button");
+  clearBtn.className = "btn";
+  clearBtn.type = "button";
+  clearBtn.textContent = "Limpar";
+  clearBtn.style.fontSize = "12px";
+
+  clearBtn.onclick = () => {
+    fileInput.value = "";   // Reset input
+    equipment.image = null; // Clear state
+
+    // Reset UI
+    imgElement.removeAttribute("src");
+    imgElement.style.display = "none";
+    placeHolder.style.display = "block";
+    xBox.style.height = "90px"; // Reset to default height
+
+    scheduleStateSave();
+  }
+
+  actionRow.append(uploadLabel, clearBtn);
+  return actionRow;
 }
 
 /* =============================
